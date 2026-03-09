@@ -16237,7 +16237,7 @@ var require_events = __commonJS({
     var { kEnumerableProperty } = require_util();
     var { kConstruct } = require_symbols();
     var { MessagePort } = require("worker_threads");
-    var MessageEvent = class _MessageEvent extends Event {
+    var MessageEvent2 = class _MessageEvent extends Event {
       #eventInit;
       constructor(type, eventInitDict = {}) {
         if (type === kConstruct) {
@@ -16300,8 +16300,8 @@ var require_events = __commonJS({
         return messageEvent;
       }
     };
-    var { createFastMessageEvent } = MessageEvent;
-    delete MessageEvent.createFastMessageEvent;
+    var { createFastMessageEvent } = MessageEvent2;
+    delete MessageEvent2.createFastMessageEvent;
     var CloseEvent = class _CloseEvent extends Event {
       #eventInit;
       constructor(type, eventInitDict = {}) {
@@ -16326,7 +16326,7 @@ var require_events = __commonJS({
         return this.#eventInit.reason;
       }
     };
-    var ErrorEvent = class _ErrorEvent extends Event {
+    var ErrorEvent2 = class _ErrorEvent extends Event {
       #eventInit;
       constructor(type, eventInitDict) {
         const prefix = "ErrorEvent constructor";
@@ -16358,7 +16358,7 @@ var require_events = __commonJS({
         return this.#eventInit.error;
       }
     };
-    Object.defineProperties(MessageEvent.prototype, {
+    Object.defineProperties(MessageEvent2.prototype, {
       [Symbol.toStringTag]: {
         value: "MessageEvent",
         configurable: true
@@ -16379,7 +16379,7 @@ var require_events = __commonJS({
       code: kEnumerableProperty,
       wasClean: kEnumerableProperty
     });
-    Object.defineProperties(ErrorEvent.prototype, {
+    Object.defineProperties(ErrorEvent2.prototype, {
       [Symbol.toStringTag]: {
         value: "ErrorEvent",
         configurable: true
@@ -16487,9 +16487,9 @@ var require_events = __commonJS({
       }
     ]);
     module2.exports = {
-      MessageEvent,
+      MessageEvent: MessageEvent2,
       CloseEvent,
-      ErrorEvent,
+      ErrorEvent: ErrorEvent2,
       createFastMessageEvent
     };
   }
@@ -16575,7 +16575,7 @@ var require_util7 = __commonJS({
     "use strict";
     var { kReadyState, kController, kResponse, kBinaryType, kWebSocketURL } = require_symbols5();
     var { states, opcodes } = require_constants5();
-    var { ErrorEvent, createFastMessageEvent } = require_events();
+    var { ErrorEvent: ErrorEvent2, createFastMessageEvent } = require_events();
     var { isUtf8 } = require("buffer");
     var { collectASequenceOfCodePointsFast, removeHTTPWhitespace } = require_data_url();
     function isConnecting(ws) {
@@ -16668,7 +16668,7 @@ var require_util7 = __commonJS({
         response.socket.destroy();
       }
       if (reason) {
-        fireEvent("error", ws, (type, init) => new ErrorEvent(type, init), {
+        fireEvent("error", ws, (type, init) => new ErrorEvent2(type, init), {
           error: new Error(reason),
           message: reason
         });
@@ -17471,7 +17471,7 @@ var require_websocket = __commonJS({
     var { kEnumerableProperty, isBlobLike } = require_util();
     var { getGlobalDispatcher } = require_global2();
     var { types } = require("util");
-    var { ErrorEvent, CloseEvent } = require_events();
+    var { ErrorEvent: ErrorEvent2, CloseEvent } = require_events();
     var { SendQueue } = require_sender();
     var WebSocket = class _WebSocket extends EventTarget {
       #events = {
@@ -17817,7 +17817,7 @@ var require_websocket = __commonJS({
       } else {
         message = err.message;
       }
-      fireEvent("error", this, () => new ErrorEvent("error", { error: err, message }));
+      fireEvent("error", this, () => new ErrorEvent2("error", { error: err, message }));
       closeWebSocketConnection(this, code);
     }
     module2.exports = {
@@ -18105,7 +18105,7 @@ var require_eventsource = __commonJS({
     var CLOSED = 2;
     var ANONYMOUS = "anonymous";
     var USE_CREDENTIALS = "use-credentials";
-    var EventSource = class _EventSource extends EventTarget {
+    var EventSource2 = class _EventSource extends EventTarget {
       #events = {
         open: null,
         error: null,
@@ -18350,9 +18350,9 @@ var require_eventsource = __commonJS({
         writable: false
       }
     };
-    Object.defineProperties(EventSource, constantsPropertyDescriptors);
-    Object.defineProperties(EventSource.prototype, constantsPropertyDescriptors);
-    Object.defineProperties(EventSource.prototype, {
+    Object.defineProperties(EventSource2, constantsPropertyDescriptors);
+    Object.defineProperties(EventSource2.prototype, constantsPropertyDescriptors);
+    Object.defineProperties(EventSource2.prototype, {
       close: kEnumerableProperty,
       onerror: kEnumerableProperty,
       onmessage: kEnumerableProperty,
@@ -18374,7 +18374,7 @@ var require_eventsource = __commonJS({
       }
     ]);
     module2.exports = {
-      EventSource,
+      EventSource: EventSource2,
       defaultReconnectionTime
     };
   }
@@ -18503,11 +18503,11 @@ var require_undici = __commonJS({
     var { parseMIMEType, serializeAMimeType } = require_data_url();
     module2.exports.parseMIMEType = parseMIMEType;
     module2.exports.serializeAMimeType = serializeAMimeType;
-    var { CloseEvent, ErrorEvent, MessageEvent } = require_events();
+    var { CloseEvent, ErrorEvent: ErrorEvent2, MessageEvent: MessageEvent2 } = require_events();
     module2.exports.WebSocket = require_websocket().WebSocket;
     module2.exports.CloseEvent = CloseEvent;
-    module2.exports.ErrorEvent = ErrorEvent;
-    module2.exports.MessageEvent = MessageEvent;
+    module2.exports.ErrorEvent = ErrorEvent2;
+    module2.exports.MessageEvent = MessageEvent2;
     module2.exports.request = makeDispatcher(api.request);
     module2.exports.stream = makeDispatcher(api.stream);
     module2.exports.pipeline = makeDispatcher(api.pipeline);
@@ -18517,8 +18517,8 @@ var require_undici = __commonJS({
     module2.exports.MockPool = MockPool;
     module2.exports.MockAgent = MockAgent;
     module2.exports.mockErrors = mockErrors;
-    var { EventSource } = require_eventsource();
-    module2.exports.EventSource = EventSource;
+    var { EventSource: EventSource2 } = require_eventsource();
+    module2.exports.EventSource = EventSource2;
   }
 });
 
@@ -27141,6 +27141,13 @@ function getInput(name, options) {
     return val;
   }
   return val.trim();
+}
+function getMultilineInput(name, options) {
+  const inputs = getInput(name, options).split("\n").filter((x) => x !== "");
+  if (options && options.trimWhitespace === false) {
+    return inputs;
+  }
+  return inputs.map((input) => input.trim());
 }
 function getBooleanInput(name, options) {
   const trueValue = ["true", "True", "TRUE"];
@@ -45788,205 +45795,404 @@ var Client = class extends Protocol {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
-var import_cross_spawn = __toESM(require_cross_spawn(), 1);
-var import_node_process = __toESM(require("process"), 1);
-var import_node_stream = require("stream");
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
-var ReadBuffer = class {
-  append(chunk) {
-    this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
-  }
-  readMessage() {
-    if (!this._buffer) {
-      return null;
-    }
-    const index = this._buffer.indexOf("\n");
-    if (index === -1) {
-      return null;
-    }
-    const line = this._buffer.toString("utf8", 0, index).replace(/\r$/, "");
-    this._buffer = this._buffer.subarray(index + 1);
-    return deserializeMessage(line);
-  }
-  clear() {
-    this._buffer = void 0;
+// node_modules/eventsource-parser/dist/index.js
+var ParseError = class extends Error {
+  constructor(message, options) {
+    super(message), this.name = "ParseError", this.type = options.type, this.field = options.field, this.value = options.value, this.line = options.line;
   }
 };
-function deserializeMessage(line) {
-  return JSONRPCMessageSchema.parse(JSON.parse(line));
+function noop3(_arg) {
 }
-function serializeMessage(message) {
-  return JSON.stringify(message) + "\n";
+function createParser(callbacks) {
+  if (typeof callbacks == "function")
+    throw new TypeError(
+      "`callbacks` must be an object, got a function instead. Did you mean `{onEvent: fn}`?"
+    );
+  const { onEvent = noop3, onError = noop3, onRetry = noop3, onComment } = callbacks;
+  let incompleteLine = "", isFirstChunk = true, id, data = "", eventType = "";
+  function feed(newChunk) {
+    const chunk = isFirstChunk ? newChunk.replace(/^\xEF\xBB\xBF/, "") : newChunk, [complete, incomplete] = splitLines(`${incompleteLine}${chunk}`);
+    for (const line of complete)
+      parseLine(line);
+    incompleteLine = incomplete, isFirstChunk = false;
+  }
+  function parseLine(line) {
+    if (line === "") {
+      dispatchEvent();
+      return;
+    }
+    if (line.startsWith(":")) {
+      onComment && onComment(line.slice(line.startsWith(": ") ? 2 : 1));
+      return;
+    }
+    const fieldSeparatorIndex = line.indexOf(":");
+    if (fieldSeparatorIndex !== -1) {
+      const field = line.slice(0, fieldSeparatorIndex), offset = line[fieldSeparatorIndex + 1] === " " ? 2 : 1, value = line.slice(fieldSeparatorIndex + offset);
+      processField(field, value, line);
+      return;
+    }
+    processField(line, "", line);
+  }
+  function processField(field, value, line) {
+    switch (field) {
+      case "event":
+        eventType = value;
+        break;
+      case "data":
+        data = `${data}${value}
+`;
+        break;
+      case "id":
+        id = value.includes("\0") ? void 0 : value;
+        break;
+      case "retry":
+        /^\d+$/.test(value) ? onRetry(parseInt(value, 10)) : onError(
+          new ParseError(`Invalid \`retry\` value: "${value}"`, {
+            type: "invalid-retry",
+            value,
+            line
+          })
+        );
+        break;
+      default:
+        onError(
+          new ParseError(
+            `Unknown field "${field.length > 20 ? `${field.slice(0, 20)}\u2026` : field}"`,
+            { type: "unknown-field", field, value, line }
+          )
+        );
+        break;
+    }
+  }
+  function dispatchEvent() {
+    data.length > 0 && onEvent({
+      id,
+      event: eventType || void 0,
+      // If the data buffer's last character is a U+000A LINE FEED (LF) character,
+      // then remove the last character from the data buffer.
+      data: data.endsWith(`
+`) ? data.slice(0, -1) : data
+    }), id = void 0, data = "", eventType = "";
+  }
+  function reset(options = {}) {
+    incompleteLine && options.consume && parseLine(incompleteLine), isFirstChunk = true, id = void 0, data = "", eventType = "", incompleteLine = "";
+  }
+  return { feed, reset };
+}
+function splitLines(chunk) {
+  const lines = [];
+  let incompleteLine = "", searchIndex = 0;
+  for (; searchIndex < chunk.length; ) {
+    const crIndex = chunk.indexOf("\r", searchIndex), lfIndex = chunk.indexOf(`
+`, searchIndex);
+    let lineEnd = -1;
+    if (crIndex !== -1 && lfIndex !== -1 ? lineEnd = Math.min(crIndex, lfIndex) : crIndex !== -1 ? crIndex === chunk.length - 1 ? lineEnd = -1 : lineEnd = crIndex : lfIndex !== -1 && (lineEnd = lfIndex), lineEnd === -1) {
+      incompleteLine = chunk.slice(searchIndex);
+      break;
+    } else {
+      const line = chunk.slice(searchIndex, lineEnd);
+      lines.push(line), searchIndex = lineEnd + 1, chunk[searchIndex - 1] === "\r" && chunk[searchIndex] === `
+` && searchIndex++;
+    }
+  }
+  return [lines, incompleteLine];
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
-var DEFAULT_INHERITED_ENV_VARS = import_node_process.default.platform === "win32" ? [
-  "APPDATA",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "LOCALAPPDATA",
-  "PATH",
-  "PROCESSOR_ARCHITECTURE",
-  "SYSTEMDRIVE",
-  "SYSTEMROOT",
-  "TEMP",
-  "USERNAME",
-  "USERPROFILE",
-  "PROGRAMFILES"
-] : (
-  /* list inspired by the default env inheritance of sudo */
-  ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"]
-);
-function getDefaultEnvironment() {
-  const env = {};
-  for (const key of DEFAULT_INHERITED_ENV_VARS) {
-    const value = import_node_process.default.env[key];
-    if (value === void 0) {
-      continue;
-    }
-    if (value.startsWith("()")) {
-      continue;
-    }
-    env[key] = value;
-  }
-  return env;
-}
-var StdioClientTransport = class {
-  constructor(server) {
-    this._readBuffer = new ReadBuffer();
-    this._stderrStream = null;
-    this._serverParams = server;
-    if (server.stderr === "pipe" || server.stderr === "overlapped") {
-      this._stderrStream = new import_node_stream.PassThrough();
-    }
-  }
+// node_modules/eventsource/dist/index.js
+var ErrorEvent = class extends Event {
   /**
-   * Starts the server process and prepares to communicate with it.
-   */
-  async start() {
-    if (this._process) {
-      throw new Error("StdioClientTransport already started! If using Client class, note that connect() calls start() automatically.");
-    }
-    return new Promise((resolve, reject) => {
-      this._process = (0, import_cross_spawn.default)(this._serverParams.command, this._serverParams.args ?? [], {
-        // merge default env with server env because mcp server needs some env vars
-        env: {
-          ...getDefaultEnvironment(),
-          ...this._serverParams.env
-        },
-        stdio: ["pipe", "pipe", this._serverParams.stderr ?? "inherit"],
-        shell: false,
-        windowsHide: import_node_process.default.platform === "win32" && isElectron(),
-        cwd: this._serverParams.cwd
-      });
-      this._process.on("error", (error3) => {
-        reject(error3);
-        this.onerror?.(error3);
-      });
-      this._process.on("spawn", () => {
-        resolve();
-      });
-      this._process.on("close", (_code) => {
-        this._process = void 0;
-        this.onclose?.();
-      });
-      this._process.stdin?.on("error", (error3) => {
-        this.onerror?.(error3);
-      });
-      this._process.stdout?.on("data", (chunk) => {
-        this._readBuffer.append(chunk);
-        this.processReadBuffer();
-      });
-      this._process.stdout?.on("error", (error3) => {
-        this.onerror?.(error3);
-      });
-      if (this._stderrStream && this._process.stderr) {
-        this._process.stderr.pipe(this._stderrStream);
-      }
-    });
-  }
-  /**
-   * The stderr stream of the child process, if `StdioServerParameters.stderr` was set to "pipe" or "overlapped".
+   * Constructs a new `ErrorEvent` instance. This is typically not called directly,
+   * but rather emitted by the `EventSource` object when an error occurs.
    *
-   * If stderr piping was requested, a PassThrough stream is returned _immediately_, allowing callers to
-   * attach listeners before the start method is invoked. This prevents loss of any early
-   * error output emitted by the child process.
+   * @param type - The type of the event (should be "error")
+   * @param errorEventInitDict - Optional properties to include in the error event
    */
-  get stderr() {
-    if (this._stderrStream) {
-      return this._stderrStream;
-    }
-    return this._process?.stderr ?? null;
+  constructor(type, errorEventInitDict) {
+    var _a2, _b;
+    super(type), this.code = (_a2 = errorEventInitDict == null ? void 0 : errorEventInitDict.code) != null ? _a2 : void 0, this.message = (_b = errorEventInitDict == null ? void 0 : errorEventInitDict.message) != null ? _b : void 0;
   }
   /**
-   * The child process pid spawned by this transport.
+   * Node.js "hides" the `message` and `code` properties of the `ErrorEvent` instance,
+   * when it is `console.log`'ed. This makes it harder to debug errors. To ease debugging,
+   * we explicitly include the properties in the `inspect` method.
    *
-   * This is only available after the transport has been started.
+   * This is automatically called by Node.js when you `console.log` an instance of this class.
+   *
+   * @param _depth - The current depth
+   * @param options - The options passed to `util.inspect`
+   * @param inspect - The inspect function to use (prevents having to import it from `util`)
+   * @returns A string representation of the error
    */
-  get pid() {
-    return this._process?.pid ?? null;
+  [/* @__PURE__ */ Symbol.for("nodejs.util.inspect.custom")](_depth, options, inspect) {
+    return inspect(inspectableError(this), options);
   }
-  processReadBuffer() {
-    while (true) {
-      try {
-        const message = this._readBuffer.readMessage();
-        if (message === null) {
-          break;
-        }
-        this.onmessage?.(message);
-      } catch (error3) {
-        this.onerror?.(error3);
-      }
-    }
-  }
-  async close() {
-    if (this._process) {
-      const processToClose = this._process;
-      this._process = void 0;
-      const closePromise = new Promise((resolve) => {
-        processToClose.once("close", () => {
-          resolve();
-        });
-      });
-      try {
-        processToClose.stdin?.end();
-      } catch {
-      }
-      await Promise.race([closePromise, new Promise((resolve) => setTimeout(resolve, 2e3).unref())]);
-      if (processToClose.exitCode === null) {
-        try {
-          processToClose.kill("SIGTERM");
-        } catch {
-        }
-        await Promise.race([closePromise, new Promise((resolve) => setTimeout(resolve, 2e3).unref())]);
-      }
-      if (processToClose.exitCode === null) {
-        try {
-          processToClose.kill("SIGKILL");
-        } catch {
-        }
-      }
-    }
-    this._readBuffer.clear();
-  }
-  send(message) {
-    return new Promise((resolve) => {
-      if (!this._process?.stdin) {
-        throw new Error("Not connected");
-      }
-      const json2 = serializeMessage(message);
-      if (this._process.stdin.write(json2)) {
-        resolve();
-      } else {
-        this._process.stdin.once("drain", resolve);
-      }
-    });
+  /**
+   * Deno "hides" the `message` and `code` properties of the `ErrorEvent` instance,
+   * when it is `console.log`'ed. This makes it harder to debug errors. To ease debugging,
+   * we explicitly include the properties in the `inspect` method.
+   *
+   * This is automatically called by Deno when you `console.log` an instance of this class.
+   *
+   * @param inspect - The inspect function to use (prevents having to import it from `util`)
+   * @param options - The options passed to `Deno.inspect`
+   * @returns A string representation of the error
+   */
+  [/* @__PURE__ */ Symbol.for("Deno.customInspect")](inspect, options) {
+    return inspect(inspectableError(this), options);
   }
 };
-function isElectron() {
-  return "type" in import_node_process.default;
+function syntaxError(message) {
+  const DomException = globalThis.DOMException;
+  return typeof DomException == "function" ? new DomException(message, "SyntaxError") : new SyntaxError(message);
+}
+function flattenError2(err) {
+  return err instanceof Error ? "errors" in err && Array.isArray(err.errors) ? err.errors.map(flattenError2).join(", ") : "cause" in err && err.cause instanceof Error ? `${err}: ${flattenError2(err.cause)}` : err.message : `${err}`;
+}
+function inspectableError(err) {
+  return {
+    type: err.type,
+    message: err.message,
+    code: err.code,
+    defaultPrevented: err.defaultPrevented,
+    cancelable: err.cancelable,
+    timeStamp: err.timeStamp
+  };
+}
+var __typeError = (msg) => {
+  throw TypeError(msg);
+};
+var __accessCheck = (obj, member, msg) => member.has(obj) || __typeError("Cannot " + msg);
+var __privateGet = (obj, member, getter) => (__accessCheck(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
+var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
+var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), member.set(obj, value), value);
+var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
+var _readyState;
+var _url2;
+var _redirectUrl;
+var _withCredentials;
+var _fetch;
+var _reconnectInterval;
+var _reconnectTimer;
+var _lastEventId;
+var _controller;
+var _parser;
+var _onError;
+var _onMessage;
+var _onOpen;
+var _EventSource_instances;
+var connect_fn;
+var _onFetchResponse;
+var _onFetchError;
+var getRequestOptions_fn;
+var _onEvent;
+var _onRetryChange;
+var failConnection_fn;
+var scheduleReconnect_fn;
+var _reconnect;
+var EventSource = class extends EventTarget {
+  constructor(url2, eventSourceInitDict) {
+    var _a2, _b;
+    super(), __privateAdd(this, _EventSource_instances), this.CONNECTING = 0, this.OPEN = 1, this.CLOSED = 2, __privateAdd(this, _readyState), __privateAdd(this, _url2), __privateAdd(this, _redirectUrl), __privateAdd(this, _withCredentials), __privateAdd(this, _fetch), __privateAdd(this, _reconnectInterval), __privateAdd(this, _reconnectTimer), __privateAdd(this, _lastEventId, null), __privateAdd(this, _controller), __privateAdd(this, _parser), __privateAdd(this, _onError, null), __privateAdd(this, _onMessage, null), __privateAdd(this, _onOpen, null), __privateAdd(this, _onFetchResponse, async (response) => {
+      var _a22;
+      __privateGet(this, _parser).reset();
+      const { body, redirected, status, headers } = response;
+      if (status === 204) {
+        __privateMethod(this, _EventSource_instances, failConnection_fn).call(this, "Server sent HTTP 204, not reconnecting", 204), this.close();
+        return;
+      }
+      if (redirected ? __privateSet(this, _redirectUrl, new URL(response.url)) : __privateSet(this, _redirectUrl, void 0), status !== 200) {
+        __privateMethod(this, _EventSource_instances, failConnection_fn).call(this, `Non-200 status code (${status})`, status);
+        return;
+      }
+      if (!(headers.get("content-type") || "").startsWith("text/event-stream")) {
+        __privateMethod(this, _EventSource_instances, failConnection_fn).call(this, 'Invalid content type, expected "text/event-stream"', status);
+        return;
+      }
+      if (__privateGet(this, _readyState) === this.CLOSED)
+        return;
+      __privateSet(this, _readyState, this.OPEN);
+      const openEvent = new Event("open");
+      if ((_a22 = __privateGet(this, _onOpen)) == null || _a22.call(this, openEvent), this.dispatchEvent(openEvent), typeof body != "object" || !body || !("getReader" in body)) {
+        __privateMethod(this, _EventSource_instances, failConnection_fn).call(this, "Invalid response body, expected a web ReadableStream", status), this.close();
+        return;
+      }
+      const decoder = new TextDecoder(), reader = body.getReader();
+      let open2 = true;
+      do {
+        const { done, value } = await reader.read();
+        value && __privateGet(this, _parser).feed(decoder.decode(value, { stream: !done })), done && (open2 = false, __privateGet(this, _parser).reset(), __privateMethod(this, _EventSource_instances, scheduleReconnect_fn).call(this));
+      } while (open2);
+    }), __privateAdd(this, _onFetchError, (err) => {
+      __privateSet(this, _controller, void 0), !(err.name === "AbortError" || err.type === "aborted") && __privateMethod(this, _EventSource_instances, scheduleReconnect_fn).call(this, flattenError2(err));
+    }), __privateAdd(this, _onEvent, (event) => {
+      typeof event.id == "string" && __privateSet(this, _lastEventId, event.id);
+      const messageEvent = new MessageEvent(event.event || "message", {
+        data: event.data,
+        origin: __privateGet(this, _redirectUrl) ? __privateGet(this, _redirectUrl).origin : __privateGet(this, _url2).origin,
+        lastEventId: event.id || ""
+      });
+      __privateGet(this, _onMessage) && (!event.event || event.event === "message") && __privateGet(this, _onMessage).call(this, messageEvent), this.dispatchEvent(messageEvent);
+    }), __privateAdd(this, _onRetryChange, (value) => {
+      __privateSet(this, _reconnectInterval, value);
+    }), __privateAdd(this, _reconnect, () => {
+      __privateSet(this, _reconnectTimer, void 0), __privateGet(this, _readyState) === this.CONNECTING && __privateMethod(this, _EventSource_instances, connect_fn).call(this);
+    });
+    try {
+      if (url2 instanceof URL)
+        __privateSet(this, _url2, url2);
+      else if (typeof url2 == "string")
+        __privateSet(this, _url2, new URL(url2, getBaseURL()));
+      else
+        throw new Error("Invalid URL");
+    } catch {
+      throw syntaxError("An invalid or illegal string was specified");
+    }
+    __privateSet(this, _parser, createParser({
+      onEvent: __privateGet(this, _onEvent),
+      onRetry: __privateGet(this, _onRetryChange)
+    })), __privateSet(this, _readyState, this.CONNECTING), __privateSet(this, _reconnectInterval, 3e3), __privateSet(this, _fetch, (_a2 = eventSourceInitDict == null ? void 0 : eventSourceInitDict.fetch) != null ? _a2 : globalThis.fetch), __privateSet(this, _withCredentials, (_b = eventSourceInitDict == null ? void 0 : eventSourceInitDict.withCredentials) != null ? _b : false), __privateMethod(this, _EventSource_instances, connect_fn).call(this);
+  }
+  /**
+   * Returns the state of this EventSource object's connection. It can have the values described below.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
+   *
+   * Note: typed as `number` instead of `0 | 1 | 2` for compatibility with the `EventSource` interface,
+   * defined in the TypeScript `dom` library.
+   *
+   * @public
+   */
+  get readyState() {
+    return __privateGet(this, _readyState);
+  }
+  /**
+   * Returns the URL providing the event stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
+   *
+   * @public
+   */
+  get url() {
+    return __privateGet(this, _url2).href;
+  }
+  /**
+   * Returns true if the credentials mode for connection requests to the URL providing the event stream is set to "include", and false otherwise.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
+   */
+  get withCredentials() {
+    return __privateGet(this, _withCredentials);
+  }
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/error_event) */
+  get onerror() {
+    return __privateGet(this, _onError);
+  }
+  set onerror(value) {
+    __privateSet(this, _onError, value);
+  }
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/message_event) */
+  get onmessage() {
+    return __privateGet(this, _onMessage);
+  }
+  set onmessage(value) {
+    __privateSet(this, _onMessage, value);
+  }
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/open_event) */
+  get onopen() {
+    return __privateGet(this, _onOpen);
+  }
+  set onopen(value) {
+    __privateSet(this, _onOpen, value);
+  }
+  addEventListener(type, listener, options) {
+    const listen = listener;
+    super.addEventListener(type, listen, options);
+  }
+  removeEventListener(type, listener, options) {
+    const listen = listener;
+    super.removeEventListener(type, listen, options);
+  }
+  /**
+   * Aborts any instances of the fetch algorithm started for this EventSource object, and sets the readyState attribute to CLOSED.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
+   *
+   * @public
+   */
+  close() {
+    __privateGet(this, _reconnectTimer) && clearTimeout(__privateGet(this, _reconnectTimer)), __privateGet(this, _readyState) !== this.CLOSED && (__privateGet(this, _controller) && __privateGet(this, _controller).abort(), __privateSet(this, _readyState, this.CLOSED), __privateSet(this, _controller, void 0));
+  }
+};
+_readyState = /* @__PURE__ */ new WeakMap(), _url2 = /* @__PURE__ */ new WeakMap(), _redirectUrl = /* @__PURE__ */ new WeakMap(), _withCredentials = /* @__PURE__ */ new WeakMap(), _fetch = /* @__PURE__ */ new WeakMap(), _reconnectInterval = /* @__PURE__ */ new WeakMap(), _reconnectTimer = /* @__PURE__ */ new WeakMap(), _lastEventId = /* @__PURE__ */ new WeakMap(), _controller = /* @__PURE__ */ new WeakMap(), _parser = /* @__PURE__ */ new WeakMap(), _onError = /* @__PURE__ */ new WeakMap(), _onMessage = /* @__PURE__ */ new WeakMap(), _onOpen = /* @__PURE__ */ new WeakMap(), _EventSource_instances = /* @__PURE__ */ new WeakSet(), /**
+* Connect to the given URL and start receiving events
+*
+* @internal
+*/
+connect_fn = function() {
+  __privateSet(this, _readyState, this.CONNECTING), __privateSet(this, _controller, new AbortController()), __privateGet(this, _fetch)(__privateGet(this, _url2), __privateMethod(this, _EventSource_instances, getRequestOptions_fn).call(this)).then(__privateGet(this, _onFetchResponse)).catch(__privateGet(this, _onFetchError));
+}, _onFetchResponse = /* @__PURE__ */ new WeakMap(), _onFetchError = /* @__PURE__ */ new WeakMap(), /**
+* Get request options for the `fetch()` request
+*
+* @returns The request options
+* @internal
+*/
+getRequestOptions_fn = function() {
+  var _a2;
+  const init = {
+    // [spec] Let `corsAttributeState` be `Anonymous`…
+    // [spec] …will have their mode set to "cors"…
+    mode: "cors",
+    redirect: "follow",
+    headers: { Accept: "text/event-stream", ...__privateGet(this, _lastEventId) ? { "Last-Event-ID": __privateGet(this, _lastEventId) } : void 0 },
+    cache: "no-store",
+    signal: (_a2 = __privateGet(this, _controller)) == null ? void 0 : _a2.signal
+  };
+  return "window" in globalThis && (init.credentials = this.withCredentials ? "include" : "same-origin"), init;
+}, _onEvent = /* @__PURE__ */ new WeakMap(), _onRetryChange = /* @__PURE__ */ new WeakMap(), /**
+* Handles the process referred to in the EventSource specification as "failing a connection".
+*
+* @param error - The error causing the connection to fail
+* @param code - The HTTP status code, if available
+* @internal
+*/
+failConnection_fn = function(message, code) {
+  var _a2;
+  __privateGet(this, _readyState) !== this.CLOSED && __privateSet(this, _readyState, this.CLOSED);
+  const errorEvent = new ErrorEvent("error", { code, message });
+  (_a2 = __privateGet(this, _onError)) == null || _a2.call(this, errorEvent), this.dispatchEvent(errorEvent);
+}, /**
+* Schedules a reconnection attempt against the EventSource endpoint.
+*
+* @param message - The error causing the connection to fail
+* @param code - The HTTP status code, if available
+* @internal
+*/
+scheduleReconnect_fn = function(message, code) {
+  var _a2;
+  if (__privateGet(this, _readyState) === this.CLOSED)
+    return;
+  __privateSet(this, _readyState, this.CONNECTING);
+  const errorEvent = new ErrorEvent("error", { code, message });
+  (_a2 = __privateGet(this, _onError)) == null || _a2.call(this, errorEvent), this.dispatchEvent(errorEvent), __privateSet(this, _reconnectTimer, setTimeout(__privateGet(this, _reconnect), __privateGet(this, _reconnectInterval)));
+}, _reconnect = /* @__PURE__ */ new WeakMap(), /**
+* ReadyState representing an EventSource currently trying to connect
+*
+* @public
+*/
+EventSource.CONNECTING = 0, /**
+* ReadyState representing an EventSource connection that is open (eg connected)
+*
+* @public
+*/
+EventSource.OPEN = 1, /**
+* ReadyState representing an EventSource connection that is closed (eg disconnected)
+*
+* @public
+*/
+EventSource.CLOSED = 2;
+function getBaseURL() {
+  const doc = "document" in globalThis ? globalThis.document : void 0;
+  return doc && typeof doc == "object" && "baseURI" in doc && typeof doc.baseURI == "string" ? doc.baseURI : void 0;
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/transport.js
@@ -46854,107 +47060,396 @@ async function registerClient(authorizationServerUrl, { metadata, clientMetadata
   return OAuthClientInformationFullSchema.parse(await response.json());
 }
 
-// node_modules/eventsource-parser/dist/index.js
-var ParseError = class extends Error {
-  constructor(message, options) {
-    super(message), this.name = "ParseError", this.type = options.type, this.field = options.field, this.value = options.value, this.line = options.line;
+// node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.js
+var SseError = class extends Error {
+  constructor(code, message, event) {
+    super(`SSE error: ${message}`);
+    this.code = code;
+    this.event = event;
   }
 };
-function noop3(_arg) {
+var SSEClientTransport = class {
+  constructor(url2, opts) {
+    this._url = url2;
+    this._resourceMetadataUrl = void 0;
+    this._scope = void 0;
+    this._eventSourceInit = opts?.eventSourceInit;
+    this._requestInit = opts?.requestInit;
+    this._authProvider = opts?.authProvider;
+    this._fetch = opts?.fetch;
+    this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
+  }
+  async _authThenStart() {
+    if (!this._authProvider) {
+      throw new UnauthorizedError("No auth provider");
+    }
+    let result;
+    try {
+      result = await auth2(this._authProvider, {
+        serverUrl: this._url,
+        resourceMetadataUrl: this._resourceMetadataUrl,
+        scope: this._scope,
+        fetchFn: this._fetchWithInit
+      });
+    } catch (error3) {
+      this.onerror?.(error3);
+      throw error3;
+    }
+    if (result !== "AUTHORIZED") {
+      throw new UnauthorizedError();
+    }
+    return await this._startOrAuth();
+  }
+  async _commonHeaders() {
+    const headers = {};
+    if (this._authProvider) {
+      const tokens = await this._authProvider.tokens();
+      if (tokens) {
+        headers["Authorization"] = `Bearer ${tokens.access_token}`;
+      }
+    }
+    if (this._protocolVersion) {
+      headers["mcp-protocol-version"] = this._protocolVersion;
+    }
+    const extraHeaders = normalizeHeaders(this._requestInit?.headers);
+    return new Headers({
+      ...headers,
+      ...extraHeaders
+    });
+  }
+  _startOrAuth() {
+    const fetchImpl = this?._eventSourceInit?.fetch ?? this._fetch ?? fetch;
+    return new Promise((resolve, reject) => {
+      this._eventSource = new EventSource(this._url.href, {
+        ...this._eventSourceInit,
+        fetch: async (url2, init) => {
+          const headers = await this._commonHeaders();
+          headers.set("Accept", "text/event-stream");
+          const response = await fetchImpl(url2, {
+            ...init,
+            headers
+          });
+          if (response.status === 401 && response.headers.has("www-authenticate")) {
+            const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
+            this._resourceMetadataUrl = resourceMetadataUrl;
+            this._scope = scope;
+          }
+          return response;
+        }
+      });
+      this._abortController = new AbortController();
+      this._eventSource.onerror = (event) => {
+        if (event.code === 401 && this._authProvider) {
+          this._authThenStart().then(resolve, reject);
+          return;
+        }
+        const error3 = new SseError(event.code, event.message, event);
+        reject(error3);
+        this.onerror?.(error3);
+      };
+      this._eventSource.onopen = () => {
+      };
+      this._eventSource.addEventListener("endpoint", (event) => {
+        const messageEvent = event;
+        try {
+          this._endpoint = new URL(messageEvent.data, this._url);
+          if (this._endpoint.origin !== this._url.origin) {
+            throw new Error(`Endpoint origin does not match connection origin: ${this._endpoint.origin}`);
+          }
+        } catch (error3) {
+          reject(error3);
+          this.onerror?.(error3);
+          void this.close();
+          return;
+        }
+        resolve();
+      });
+      this._eventSource.onmessage = (event) => {
+        const messageEvent = event;
+        let message;
+        try {
+          message = JSONRPCMessageSchema.parse(JSON.parse(messageEvent.data));
+        } catch (error3) {
+          this.onerror?.(error3);
+          return;
+        }
+        this.onmessage?.(message);
+      };
+    });
+  }
+  async start() {
+    if (this._eventSource) {
+      throw new Error("SSEClientTransport already started! If using Client class, note that connect() calls start() automatically.");
+    }
+    return await this._startOrAuth();
+  }
+  /**
+   * Call this method after the user has finished authorizing via their user agent and is redirected back to the MCP client application. This will exchange the authorization code for an access token, enabling the next connection attempt to successfully auth.
+   */
+  async finishAuth(authorizationCode) {
+    if (!this._authProvider) {
+      throw new UnauthorizedError("No auth provider");
+    }
+    const result = await auth2(this._authProvider, {
+      serverUrl: this._url,
+      authorizationCode,
+      resourceMetadataUrl: this._resourceMetadataUrl,
+      scope: this._scope,
+      fetchFn: this._fetchWithInit
+    });
+    if (result !== "AUTHORIZED") {
+      throw new UnauthorizedError("Failed to authorize");
+    }
+  }
+  async close() {
+    this._abortController?.abort();
+    this._eventSource?.close();
+    this.onclose?.();
+  }
+  async send(message) {
+    if (!this._endpoint) {
+      throw new Error("Not connected");
+    }
+    try {
+      const headers = await this._commonHeaders();
+      headers.set("content-type", "application/json");
+      const init = {
+        ...this._requestInit,
+        method: "POST",
+        headers,
+        body: JSON.stringify(message),
+        signal: this._abortController?.signal
+      };
+      const response = await (this._fetch ?? fetch)(this._endpoint, init);
+      if (!response.ok) {
+        const text = await response.text().catch(() => null);
+        if (response.status === 401 && this._authProvider) {
+          const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
+          this._resourceMetadataUrl = resourceMetadataUrl;
+          this._scope = scope;
+          const result = await auth2(this._authProvider, {
+            serverUrl: this._url,
+            resourceMetadataUrl: this._resourceMetadataUrl,
+            scope: this._scope,
+            fetchFn: this._fetchWithInit
+          });
+          if (result !== "AUTHORIZED") {
+            throw new UnauthorizedError();
+          }
+          return this.send(message);
+        }
+        throw new Error(`Error POSTing to endpoint (HTTP ${response.status}): ${text}`);
+      }
+      await response.body?.cancel();
+    } catch (error3) {
+      this.onerror?.(error3);
+      throw error3;
+    }
+  }
+  setProtocolVersion(version2) {
+    this._protocolVersion = version2;
+  }
+};
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
+var import_cross_spawn = __toESM(require_cross_spawn(), 1);
+var import_node_process = __toESM(require("process"), 1);
+var import_node_stream = require("stream");
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+var ReadBuffer = class {
+  append(chunk) {
+    this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
+  }
+  readMessage() {
+    if (!this._buffer) {
+      return null;
+    }
+    const index = this._buffer.indexOf("\n");
+    if (index === -1) {
+      return null;
+    }
+    const line = this._buffer.toString("utf8", 0, index).replace(/\r$/, "");
+    this._buffer = this._buffer.subarray(index + 1);
+    return deserializeMessage(line);
+  }
+  clear() {
+    this._buffer = void 0;
+  }
+};
+function deserializeMessage(line) {
+  return JSONRPCMessageSchema.parse(JSON.parse(line));
 }
-function createParser(callbacks) {
-  if (typeof callbacks == "function")
-    throw new TypeError(
-      "`callbacks` must be an object, got a function instead. Did you mean `{onEvent: fn}`?"
-    );
-  const { onEvent = noop3, onError = noop3, onRetry = noop3, onComment } = callbacks;
-  let incompleteLine = "", isFirstChunk = true, id, data = "", eventType = "";
-  function feed(newChunk) {
-    const chunk = isFirstChunk ? newChunk.replace(/^\xEF\xBB\xBF/, "") : newChunk, [complete, incomplete] = splitLines(`${incompleteLine}${chunk}`);
-    for (const line of complete)
-      parseLine(line);
-    incompleteLine = incomplete, isFirstChunk = false;
-  }
-  function parseLine(line) {
-    if (line === "") {
-      dispatchEvent();
-      return;
-    }
-    if (line.startsWith(":")) {
-      onComment && onComment(line.slice(line.startsWith(": ") ? 2 : 1));
-      return;
-    }
-    const fieldSeparatorIndex = line.indexOf(":");
-    if (fieldSeparatorIndex !== -1) {
-      const field = line.slice(0, fieldSeparatorIndex), offset = line[fieldSeparatorIndex + 1] === " " ? 2 : 1, value = line.slice(fieldSeparatorIndex + offset);
-      processField(field, value, line);
-      return;
-    }
-    processField(line, "", line);
-  }
-  function processField(field, value, line) {
-    switch (field) {
-      case "event":
-        eventType = value;
-        break;
-      case "data":
-        data = `${data}${value}
-`;
-        break;
-      case "id":
-        id = value.includes("\0") ? void 0 : value;
-        break;
-      case "retry":
-        /^\d+$/.test(value) ? onRetry(parseInt(value, 10)) : onError(
-          new ParseError(`Invalid \`retry\` value: "${value}"`, {
-            type: "invalid-retry",
-            value,
-            line
-          })
-        );
-        break;
-      default:
-        onError(
-          new ParseError(
-            `Unknown field "${field.length > 20 ? `${field.slice(0, 20)}\u2026` : field}"`,
-            { type: "unknown-field", field, value, line }
-          )
-        );
-        break;
-    }
-  }
-  function dispatchEvent() {
-    data.length > 0 && onEvent({
-      id,
-      event: eventType || void 0,
-      // If the data buffer's last character is a U+000A LINE FEED (LF) character,
-      // then remove the last character from the data buffer.
-      data: data.endsWith(`
-`) ? data.slice(0, -1) : data
-    }), id = void 0, data = "", eventType = "";
-  }
-  function reset(options = {}) {
-    incompleteLine && options.consume && parseLine(incompleteLine), isFirstChunk = true, id = void 0, data = "", eventType = "", incompleteLine = "";
-  }
-  return { feed, reset };
+function serializeMessage(message) {
+  return JSON.stringify(message) + "\n";
 }
-function splitLines(chunk) {
-  const lines = [];
-  let incompleteLine = "", searchIndex = 0;
-  for (; searchIndex < chunk.length; ) {
-    const crIndex = chunk.indexOf("\r", searchIndex), lfIndex = chunk.indexOf(`
-`, searchIndex);
-    let lineEnd = -1;
-    if (crIndex !== -1 && lfIndex !== -1 ? lineEnd = Math.min(crIndex, lfIndex) : crIndex !== -1 ? crIndex === chunk.length - 1 ? lineEnd = -1 : lineEnd = crIndex : lfIndex !== -1 && (lineEnd = lfIndex), lineEnd === -1) {
-      incompleteLine = chunk.slice(searchIndex);
-      break;
-    } else {
-      const line = chunk.slice(searchIndex, lineEnd);
-      lines.push(line), searchIndex = lineEnd + 1, chunk[searchIndex - 1] === "\r" && chunk[searchIndex] === `
-` && searchIndex++;
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
+var DEFAULT_INHERITED_ENV_VARS = import_node_process.default.platform === "win32" ? [
+  "APPDATA",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LOCALAPPDATA",
+  "PATH",
+  "PROCESSOR_ARCHITECTURE",
+  "SYSTEMDRIVE",
+  "SYSTEMROOT",
+  "TEMP",
+  "USERNAME",
+  "USERPROFILE",
+  "PROGRAMFILES"
+] : (
+  /* list inspired by the default env inheritance of sudo */
+  ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"]
+);
+function getDefaultEnvironment() {
+  const env = {};
+  for (const key of DEFAULT_INHERITED_ENV_VARS) {
+    const value = import_node_process.default.env[key];
+    if (value === void 0) {
+      continue;
+    }
+    if (value.startsWith("()")) {
+      continue;
+    }
+    env[key] = value;
+  }
+  return env;
+}
+var StdioClientTransport = class {
+  constructor(server) {
+    this._readBuffer = new ReadBuffer();
+    this._stderrStream = null;
+    this._serverParams = server;
+    if (server.stderr === "pipe" || server.stderr === "overlapped") {
+      this._stderrStream = new import_node_stream.PassThrough();
     }
   }
-  return [lines, incompleteLine];
+  /**
+   * Starts the server process and prepares to communicate with it.
+   */
+  async start() {
+    if (this._process) {
+      throw new Error("StdioClientTransport already started! If using Client class, note that connect() calls start() automatically.");
+    }
+    return new Promise((resolve, reject) => {
+      this._process = (0, import_cross_spawn.default)(this._serverParams.command, this._serverParams.args ?? [], {
+        // merge default env with server env because mcp server needs some env vars
+        env: {
+          ...getDefaultEnvironment(),
+          ...this._serverParams.env
+        },
+        stdio: ["pipe", "pipe", this._serverParams.stderr ?? "inherit"],
+        shell: false,
+        windowsHide: import_node_process.default.platform === "win32" && isElectron(),
+        cwd: this._serverParams.cwd
+      });
+      this._process.on("error", (error3) => {
+        reject(error3);
+        this.onerror?.(error3);
+      });
+      this._process.on("spawn", () => {
+        resolve();
+      });
+      this._process.on("close", (_code) => {
+        this._process = void 0;
+        this.onclose?.();
+      });
+      this._process.stdin?.on("error", (error3) => {
+        this.onerror?.(error3);
+      });
+      this._process.stdout?.on("data", (chunk) => {
+        this._readBuffer.append(chunk);
+        this.processReadBuffer();
+      });
+      this._process.stdout?.on("error", (error3) => {
+        this.onerror?.(error3);
+      });
+      if (this._stderrStream && this._process.stderr) {
+        this._process.stderr.pipe(this._stderrStream);
+      }
+    });
+  }
+  /**
+   * The stderr stream of the child process, if `StdioServerParameters.stderr` was set to "pipe" or "overlapped".
+   *
+   * If stderr piping was requested, a PassThrough stream is returned _immediately_, allowing callers to
+   * attach listeners before the start method is invoked. This prevents loss of any early
+   * error output emitted by the child process.
+   */
+  get stderr() {
+    if (this._stderrStream) {
+      return this._stderrStream;
+    }
+    return this._process?.stderr ?? null;
+  }
+  /**
+   * The child process pid spawned by this transport.
+   *
+   * This is only available after the transport has been started.
+   */
+  get pid() {
+    return this._process?.pid ?? null;
+  }
+  processReadBuffer() {
+    while (true) {
+      try {
+        const message = this._readBuffer.readMessage();
+        if (message === null) {
+          break;
+        }
+        this.onmessage?.(message);
+      } catch (error3) {
+        this.onerror?.(error3);
+      }
+    }
+  }
+  async close() {
+    if (this._process) {
+      const processToClose = this._process;
+      this._process = void 0;
+      const closePromise = new Promise((resolve) => {
+        processToClose.once("close", () => {
+          resolve();
+        });
+      });
+      try {
+        processToClose.stdin?.end();
+      } catch {
+      }
+      await Promise.race([closePromise, new Promise((resolve) => setTimeout(resolve, 2e3).unref())]);
+      if (processToClose.exitCode === null) {
+        try {
+          processToClose.kill("SIGTERM");
+        } catch {
+        }
+        await Promise.race([closePromise, new Promise((resolve) => setTimeout(resolve, 2e3).unref())]);
+      }
+      if (processToClose.exitCode === null) {
+        try {
+          processToClose.kill("SIGKILL");
+        } catch {
+        }
+      }
+    }
+    this._readBuffer.clear();
+  }
+  send(message) {
+    return new Promise((resolve) => {
+      if (!this._process?.stdin) {
+        throw new Error("Not connected");
+      }
+      const json2 = serializeMessage(message);
+      if (this._process.stdin.write(json2)) {
+        resolve();
+      } else {
+        this._process.stdin.once("drain", resolve);
+      }
+    });
+  }
+};
+function isElectron() {
+  return "type" in import_node_process.default;
 }
 
 // node_modules/eventsource-parser/dist/stream.js
@@ -47412,10 +47907,10 @@ var VALID_SEVERITIES = /* @__PURE__ */ new Set(["safe", "warning", "breaking"]);
 function readBaseline(filePath) {
   const raw = (0, import_node_fs.readFileSync)(filePath, "utf-8");
   const data = JSON.parse(raw);
-  if (typeof data.snapshotVersion !== "string") {
+  if (typeof data["snapshotVersion"] !== "string") {
     throw new Error(`Invalid baseline: missing "snapshotVersion"`);
   }
-  if (typeof data.contentHash !== "string" || !data.contentHash.startsWith("sha256:")) {
+  if (typeof data["contentHash"] !== "string" || !data["contentHash"].startsWith("sha256:")) {
     throw new Error(`Invalid baseline: missing or invalid "contentHash"`);
   }
   return data;
@@ -47423,16 +47918,29 @@ function readBaseline(filePath) {
 async function connectToServer(options) {
   const client = new Client({ name: "mcp-contracts-action", version: "0.2.0" });
   let transport;
+  let transportType;
   if (options.command) {
     const args = options.args ?? [];
     transport = new StdioClientTransport({ command: options.command, args });
+    transportType = "stdio";
+  } else if (options.url && options.sse) {
+    const opts = options.headers ? { requestInit: { headers: options.headers } } : {};
+    transport = new SSEClientTransport(new URL(options.url), opts);
+    transportType = "sse";
   } else if (options.url) {
-    transport = new StreamableHTTPClientTransport(new URL(options.url));
+    const opts = options.headers ? { requestInit: { headers: options.headers } } : void 0;
+    transport = opts ? new StreamableHTTPClientTransport(new URL(options.url), opts) : new StreamableHTTPClientTransport(new URL(options.url));
+    transportType = "streamable-http";
   } else {
     throw new Error("Either 'command' or 'url' input is required");
   }
   await client.connect(transport, { signal: AbortSignal.timeout(3e4) });
-  return { client, transport, protocolVersion: LATEST_PROTOCOL_VERSION };
+  return {
+    client,
+    transport,
+    transportType,
+    protocolVersion: LATEST_PROTOCOL_VERSION
+  };
 }
 async function captureData(client) {
   const capabilities = client.getServerCapabilities() ?? {};
@@ -47515,7 +48023,23 @@ async function run() {
     const command = getInput("command") || void 0;
     const argsStr = getInput("args") || void 0;
     const url2 = getInput("url") || void 0;
+    const sse = getBooleanInput("sse");
+    const headersRaw = getMultilineInput("headers", { required: false });
     const failOnStr = getInput("fail-on") || "breaking";
+    if (sse && !url2) {
+      throw new Error("'sse' requires 'url' to be set");
+    }
+    const headers = {};
+    for (const line of headersRaw) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const idx = trimmed.indexOf(":");
+      if (idx === -1) {
+        throw new Error(`Invalid header line (expected "Key: Value"): ${trimmed}`);
+      }
+      headers[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+    }
+    const parsedHeaders = Object.keys(headers).length > 0 ? headers : void 0;
     if (!VALID_SEVERITIES.has(failOnStr)) {
       throw new Error(
         `Invalid fail-on value "${failOnStr}". Must be one of: safe, warning, breaking`
@@ -47524,7 +48048,13 @@ async function run() {
     const failOn = failOnStr;
     const args = argsStr ? argsStr.split(/\s+/) : void 0;
     const baseline = readBaseline(baselinePath);
-    const connection = await connectToServer({ command, args, url: url2 });
+    const connection = await connectToServer({
+      command,
+      args,
+      url: url2,
+      sse,
+      headers: parsedHeaders
+    });
     transport = connection.transport;
     const serverVersion = connection.client.getServerVersion();
     const serverCapabilities = connection.client.getServerCapabilities() ?? {};
@@ -47539,7 +48069,7 @@ async function run() {
     };
     const source = command ? [command, ...args ?? []].join(" ") : url2;
     const capture = {
-      transport: command ? "stdio" : "streamable-http",
+      transport: connection.transportType,
       source,
       tool: "mcp-contracts-action/0.2.0"
     };
@@ -47557,7 +48087,7 @@ async function run() {
     await summary.write();
     const commentOnPr = getBooleanInput("comment-on-pr");
     if (commentOnPr && context2.eventName === "pull_request") {
-      const token = getInput("github-token", { required: false }) || process.env.GITHUB_TOKEN;
+      const token = getInput("github-token", { required: false }) || process.env["GITHUB_TOKEN"];
       if (token) {
         const prNumber = context2.payload.pull_request?.number;
         if (prNumber) {

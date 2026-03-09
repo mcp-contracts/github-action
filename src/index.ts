@@ -2,18 +2,19 @@ import { readFileSync } from "node:fs";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import type {
-  DiffReport,
-  MCPContractSnapshot,
-  RawPrompt,
-  RawResource,
-  RawResourceTemplate,
-  RawTool,
-  Severity,
-  SnapshotCapture,
-  SnapshotServer,
+	DiffReport,
+	MCPContractSnapshot,
+	RawPrompt,
+	RawResource,
+	RawResourceTemplate,
+	RawTool,
+	Severity,
+	SnapshotCapture,
+	SnapshotServer,
 } from "@mcp-contracts/core";
 import { createSnapshot, diffSnapshots, formatMarkdown, SEVERITY_ORDER } from "@mcp-contracts/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -29,25 +30,25 @@ const VALID_SEVERITIES = new Set<string>(["safe", "warning", "breaking"]);
  * @returns The parsed snapshot object.
  */
 function readBaseline(filePath: string): MCPContractSnapshot {
-  const raw = readFileSync(filePath, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
+	const raw = readFileSync(filePath, "utf-8");
+	const data = JSON.parse(raw) as Record<string, unknown>;
 
-  if (typeof data.snapshotVersion !== "string") {
-    throw new Error(`Invalid baseline: missing "snapshotVersion"`);
-  }
-  if (typeof data.contentHash !== "string" || !data.contentHash.startsWith("sha256:")) {
-    throw new Error(`Invalid baseline: missing or invalid "contentHash"`);
-  }
+	if (typeof data["snapshotVersion"] !== "string") {
+		throw new Error(`Invalid baseline: missing "snapshotVersion"`);
+	}
+	if (typeof data["contentHash"] !== "string" || !data["contentHash"].startsWith("sha256:")) {
+		throw new Error(`Invalid baseline: missing or invalid "contentHash"`);
+	}
 
-  return data as unknown as MCPContractSnapshot;
+	return data as unknown as MCPContractSnapshot;
 }
 
 /** Data captured from a live MCP server. */
 interface CapturedData {
-  tools: RawTool[];
-  resources: RawResource[];
-  resourceTemplates: RawResourceTemplate[];
-  prompts: RawPrompt[];
+	tools: RawTool[];
+	resources: RawResource[];
+	resourceTemplates: RawResourceTemplate[];
+	prompts: RawPrompt[];
 }
 
 /**
@@ -57,25 +58,48 @@ interface CapturedData {
  * @returns The connected client and transport.
  */
 async function connectToServer(options: {
-  command?: string;
-  args?: string[];
-  url?: string;
-}): Promise<{ client: Client; transport: Transport; protocolVersion: string }> {
-  const client = new Client({ name: "mcp-contracts-action", version: "0.2.0" });
+	command?: string;
+	args?: string[];
+	url?: string;
+	sse?: boolean;
+	headers?: Record<string, string>;
+}): Promise<{
+	client: Client;
+	transport: Transport;
+	transportType: string;
+	protocolVersion: string;
+}> {
+	const client = new Client({ name: "mcp-contracts-action", version: "0.2.0" });
 
-  let transport: Transport;
-  if (options.command) {
-    const args = options.args ?? [];
-    transport = new StdioClientTransport({ command: options.command, args });
-  } else if (options.url) {
-    transport = new StreamableHTTPClientTransport(new URL(options.url));
-  } else {
-    throw new Error("Either 'command' or 'url' input is required");
-  }
+	let transport: Transport;
+	let transportType: string;
 
-  await client.connect(transport, { signal: AbortSignal.timeout(30_000) });
+	if (options.command) {
+		const args = options.args ?? [];
+		transport = new StdioClientTransport({ command: options.command, args });
+		transportType = "stdio";
+	} else if (options.url && options.sse) {
+		const opts = options.headers ? { requestInit: { headers: options.headers } } : {};
+		transport = new SSEClientTransport(new URL(options.url), opts);
+		transportType = "sse";
+	} else if (options.url) {
+		const opts = options.headers ? { requestInit: { headers: options.headers } } : undefined;
+		transport = opts
+			? new StreamableHTTPClientTransport(new URL(options.url), opts)
+			: new StreamableHTTPClientTransport(new URL(options.url));
+		transportType = "streamable-http";
+	} else {
+		throw new Error("Either 'command' or 'url' input is required");
+	}
 
-  return { client, transport, protocolVersion: LATEST_PROTOCOL_VERSION };
+	await client.connect(transport, { signal: AbortSignal.timeout(30_000) });
+
+	return {
+		client,
+		transport,
+		transportType,
+		protocolVersion: LATEST_PROTOCOL_VERSION,
+	};
 }
 
 /**
@@ -84,82 +108,81 @@ async function connectToServer(options: {
  * @param client - The connected MCP client.
  * @returns Captured server data.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pagination loops
 async function captureData(client: Client): Promise<CapturedData> {
-  const capabilities = client.getServerCapabilities() ?? {};
+	const capabilities = client.getServerCapabilities() ?? {};
 
-  const tools: RawTool[] = [];
-  const resources: RawResource[] = [];
-  const resourceTemplates: RawResourceTemplate[] = [];
-  const prompts: RawPrompt[] = [];
+	const tools: RawTool[] = [];
+	const resources: RawResource[] = [];
+	const resourceTemplates: RawResourceTemplate[] = [];
+	const prompts: RawPrompt[] = [];
 
-  if (capabilities.tools) {
-    let cursor: string | undefined;
-    do {
-      const result = await client.listTools(cursor ? { cursor } : undefined);
-      for (const tool of result.tools) {
-        tools.push({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema as RawTool["inputSchema"],
-          ...(tool.outputSchema && {
-            outputSchema: tool.outputSchema as Record<string, unknown>,
-          }),
-          ...(tool.annotations && {
-            annotations: tool.annotations as Record<string, unknown>,
-          }),
-        });
-      }
-      cursor = result.nextCursor;
-    } while (cursor);
-  }
+	if (capabilities.tools) {
+		let cursor: string | undefined;
+		do {
+			const result = await client.listTools(cursor ? { cursor } : undefined);
+			for (const tool of result.tools) {
+				tools.push({
+					name: tool.name,
+					description: tool.description,
+					inputSchema: tool.inputSchema as RawTool["inputSchema"],
+					...(tool.outputSchema && {
+						outputSchema: tool.outputSchema as Record<string, unknown>,
+					}),
+					...(tool.annotations && {
+						annotations: tool.annotations as Record<string, unknown>,
+					}),
+				});
+			}
+			cursor = result.nextCursor;
+		} while (cursor);
+	}
 
-  if (capabilities.resources) {
-    let cursor: string | undefined;
-    do {
-      const result = await client.listResources(cursor ? { cursor } : undefined);
-      for (const resource of result.resources) {
-        resources.push({
-          uri: resource.uri,
-          name: resource.name,
-          description: resource.description,
-          mimeType: resource.mimeType,
-        });
-      }
-      cursor = result.nextCursor;
-    } while (cursor);
+	if (capabilities.resources) {
+		let cursor: string | undefined;
+		do {
+			const result = await client.listResources(cursor ? { cursor } : undefined);
+			for (const resource of result.resources) {
+				resources.push({
+					uri: resource.uri,
+					name: resource.name,
+					description: resource.description,
+					mimeType: resource.mimeType,
+				});
+			}
+			cursor = result.nextCursor;
+		} while (cursor);
 
-    cursor = undefined;
-    do {
-      const result = await client.listResourceTemplates(cursor ? { cursor } : undefined);
-      for (const template of result.resourceTemplates) {
-        resourceTemplates.push({
-          uriTemplate: template.uriTemplate,
-          name: template.name,
-          description: template.description,
-          mimeType: template.mimeType,
-        });
-      }
-      cursor = result.nextCursor;
-    } while (cursor);
-  }
+		cursor = undefined;
+		do {
+			const result = await client.listResourceTemplates(cursor ? { cursor } : undefined);
+			for (const template of result.resourceTemplates) {
+				resourceTemplates.push({
+					uriTemplate: template.uriTemplate,
+					name: template.name,
+					description: template.description,
+					mimeType: template.mimeType,
+				});
+			}
+			cursor = result.nextCursor;
+		} while (cursor);
+	}
 
-  if (capabilities.prompts) {
-    let cursor: string | undefined;
-    do {
-      const result = await client.listPrompts(cursor ? { cursor } : undefined);
-      for (const prompt of result.prompts) {
-        prompts.push({
-          name: prompt.name,
-          description: prompt.description,
-          arguments: prompt.arguments,
-        });
-      }
-      cursor = result.nextCursor;
-    } while (cursor);
-  }
+	if (capabilities.prompts) {
+		let cursor: string | undefined;
+		do {
+			const result = await client.listPrompts(cursor ? { cursor } : undefined);
+			for (const prompt of result.prompts) {
+				prompts.push({
+					name: prompt.name,
+					description: prompt.description,
+					arguments: prompt.arguments,
+				});
+			}
+			cursor = result.nextCursor;
+		} while (cursor);
+	}
 
-  return { tools, resources, resourceTemplates, prompts };
+	return { tools, resources, resourceTemplates, prompts };
 }
 
 /**
@@ -170,8 +193,8 @@ async function captureData(client: Client): Promise<CapturedData> {
  * @returns True if any change meets or exceeds the threshold.
  */
 function exceedsThreshold(report: DiffReport, failOn: Severity): boolean {
-  const threshold = SEVERITY_ORDER[failOn];
-  return report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
+	const threshold = SEVERITY_ORDER[failOn];
+	return report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
 }
 
 /**
@@ -180,114 +203,138 @@ function exceedsThreshold(report: DiffReport, failOn: Severity): boolean {
  * Reads inputs, connects to MCP server, diffs against baseline,
  * sets outputs, writes step summary, and optionally fails the action.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestration function
 export async function run(): Promise<void> {
-  let transport: Transport | undefined;
+	let transport: Transport | undefined;
 
-  try {
-    // Read inputs
-    const baselinePath = core.getInput("baseline", { required: true });
-    const command = core.getInput("command") || undefined;
-    const argsStr = core.getInput("args") || undefined;
-    const url = core.getInput("url") || undefined;
-    const failOnStr = core.getInput("fail-on") || "breaking";
+	try {
+		// Read inputs
+		const baselinePath = core.getInput("baseline", { required: true });
+		const command = core.getInput("command") || undefined;
+		const argsStr = core.getInput("args") || undefined;
+		const url = core.getInput("url") || undefined;
+		const sse = core.getBooleanInput("sse");
+		const headersRaw = core.getMultilineInput("headers", { required: false });
+		const failOnStr = core.getInput("fail-on") || "breaking";
 
-    if (!VALID_SEVERITIES.has(failOnStr)) {
-      throw new Error(
-        `Invalid fail-on value "${failOnStr}". Must be one of: safe, warning, breaking`,
-      );
-    }
-    const failOn = failOnStr as Severity;
+		if (sse && !url) {
+			throw new Error("'sse' requires 'url' to be set");
+		}
 
-    const args = argsStr ? argsStr.split(/\s+/) : undefined;
+		const headers: Record<string, string> = {};
+		for (const line of headersRaw) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			const idx = trimmed.indexOf(":");
+			if (idx === -1) {
+				throw new Error(`Invalid header line (expected "Key: Value"): ${trimmed}`);
+			}
+			headers[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+		}
+		const parsedHeaders = Object.keys(headers).length > 0 ? headers : undefined;
 
-    // Read baseline
-    const baseline = readBaseline(baselinePath);
+		if (!VALID_SEVERITIES.has(failOnStr)) {
+			throw new Error(
+				`Invalid fail-on value "${failOnStr}". Must be one of: safe, warning, breaking`,
+			);
+		}
+		const failOn = failOnStr as Severity;
 
-    // Connect and capture
-    const connection = await connectToServer({ command, args, url });
-    transport = connection.transport;
+		const args = argsStr ? argsStr.split(/\s+/) : undefined;
 
-    const serverVersion = connection.client.getServerVersion();
-    const serverCapabilities = connection.client.getServerCapabilities() ?? {};
+		// Read baseline
+		const baseline = readBaseline(baselinePath);
 
-    const data = await captureData(connection.client);
-    await transport.close();
-    transport = undefined;
+		// Connect and capture
+		const connection = await connectToServer({
+			command,
+			args,
+			url,
+			sse,
+			headers: parsedHeaders,
+		});
+		transport = connection.transport;
 
-    // Create current snapshot
-    const server: SnapshotServer = {
-      name: serverVersion?.name ?? "unknown",
-      version: serverVersion?.version ?? "unknown",
-      protocolVersion: connection.protocolVersion,
-      capabilities: serverCapabilities as Record<string, unknown>,
-    };
+		const serverVersion = connection.client.getServerVersion();
+		const serverCapabilities = connection.client.getServerCapabilities() ?? {};
 
-    const source = command ? [command, ...(args ?? [])].join(" ") : url;
+		const data = await captureData(connection.client);
+		await transport.close();
+		transport = undefined;
 
-    const capture: SnapshotCapture = {
-      transport: command ? "stdio" : "streamable-http",
-      source,
-      tool: "mcp-contracts-action/0.2.0",
-    };
+		// Create current snapshot
+		const server: SnapshotServer = {
+			name: serverVersion?.name ?? "unknown",
+			version: serverVersion?.version ?? "unknown",
+			protocolVersion: connection.protocolVersion,
+			capabilities: serverCapabilities as Record<string, unknown>,
+		};
 
-    const current = createSnapshot({
-      server,
-      tools: data.tools,
-      resources: data.resources,
-      resourceTemplates: data.resourceTemplates,
-      prompts: data.prompts,
-      capture,
-    });
+		const source = command ? [command, ...(args ?? [])].join(" ") : url;
 
-    // Diff
-    const report = diffSnapshots(baseline, current);
+		const capture: SnapshotCapture = {
+			transport: connection.transportType,
+			source,
+			tool: "mcp-contracts-action/0.2.0",
+		};
 
-    // Format as markdown
-    const markdown = formatMarkdown(report);
+		const current = createSnapshot({
+			server,
+			tools: data.tools,
+			resources: data.resources,
+			resourceTemplates: data.resourceTemplates,
+			prompts: data.prompts,
+			capture,
+		});
 
-    // Write step summary
-    core.summary.addRaw(markdown);
-    await core.summary.write();
+		// Diff
+		const report = diffSnapshots(baseline, current);
 
-    // PR comment
-    const commentOnPr = core.getBooleanInput("comment-on-pr");
-    if (commentOnPr && github.context.eventName === "pull_request") {
-      const token = core.getInput("github-token", { required: false }) || process.env.GITHUB_TOKEN;
-      if (token) {
-        const prNumber = github.context.payload.pull_request?.number;
-        if (prNumber) {
-          await postOrUpdatePRComment(markdown, token, prNumber);
-        }
-      } else {
-        core.warning("No GitHub token available — skipping PR comment");
-      }
-    }
+		// Format as markdown
+		const markdown = formatMarkdown(report);
 
-    // Set outputs
-    const hasChanges = report.changes.length > 0;
-    const hasBreaking = report.summary.breaking > 0;
-    const shouldFail = exceedsThreshold(report, failOn);
+		// Write step summary
+		core.summary.addRaw(markdown);
+		await core.summary.write();
 
-    core.setOutput("has-changes", String(hasChanges));
-    core.setOutput("has-breaking", String(hasBreaking));
-    core.setOutput("summary", JSON.stringify(report.summary));
-    core.setOutput("exit-code", shouldFail ? "1" : "0");
+		// PR comment
+		const commentOnPr = core.getBooleanInput("comment-on-pr");
+		if (commentOnPr && github.context.eventName === "pull_request") {
+			const token =
+				core.getInput("github-token", { required: false }) || process.env["GITHUB_TOKEN"];
+			if (token) {
+				const prNumber = github.context.payload.pull_request?.number;
+				if (prNumber) {
+					await postOrUpdatePRComment(markdown, token, prNumber);
+				}
+			} else {
+				core.warning("No GitHub token available — skipping PR comment");
+			}
+		}
 
-    if (shouldFail) {
-      core.setFailed("Breaking MCP contract changes detected");
-    }
-  } catch (error) {
-    if (transport) {
-      try {
-        await transport.close();
-      } catch {
-        // ignore close errors
-      }
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    core.setFailed(message);
-  }
+		// Set outputs
+		const hasChanges = report.changes.length > 0;
+		const hasBreaking = report.summary.breaking > 0;
+		const shouldFail = exceedsThreshold(report, failOn);
+
+		core.setOutput("has-changes", String(hasChanges));
+		core.setOutput("has-breaking", String(hasBreaking));
+		core.setOutput("summary", JSON.stringify(report.summary));
+		core.setOutput("exit-code", shouldFail ? "1" : "0");
+
+		if (shouldFail) {
+			core.setFailed("Breaking MCP contract changes detected");
+		}
+	} catch (error) {
+		if (transport) {
+			try {
+				await transport.close();
+			} catch {
+				// ignore close errors
+			}
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		core.setFailed(message);
+	}
 }
 
 run();
