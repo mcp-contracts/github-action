@@ -69,7 +69,7 @@ async function connectToServer(options: {
 	transportType: string;
 	protocolVersion: string;
 }> {
-	const client = new Client({ name: "mcp-contracts-action", version: "0.2.0" });
+	const client = new Client({ name: "mcp-contracts-action", version: "0.3.0" });
 
 	let transport: Transport;
 	let transportType: string;
@@ -274,7 +274,7 @@ export async function run(): Promise<void> {
 		const capture: SnapshotCapture = {
 			transport: connection.transportType,
 			source,
-			tool: "mcp-contracts-action/0.2.0",
+			tool: "mcp-contracts-action/0.3.0",
 		};
 
 		const current = createSnapshot({

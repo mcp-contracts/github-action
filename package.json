@@ -1,6 +1,6 @@
 {
   "name": "mcp-contracts-github-action",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "build": "tsup",
@@ -9,7 +9,7 @@
   "dependencies": {
     "@actions/core": "^3.0.0",
     "@actions/github": "^9.0.0",
-    "@mcp-contracts/core": "^0.2.0",
+    "@mcp-contracts/core": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "devDependencies": {
