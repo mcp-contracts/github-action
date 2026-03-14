@@ -38,6 +38,8 @@ jobs:
 | `command`        | No\*     |              | Server command to run via stdio (e.g., `node dist/index.js`) |
 | `args`           | No       |              | Arguments for the server command (space-separated)        |
 | `url`            | No\*     |              | Server URL for streamable-http transport                  |
+| `sse`            | No       | `false`      | Use SSE transport instead of streamable-http (requires `url`) |
+| `headers`        | No       |              | Custom HTTP headers, one per line as `Key: Value`         |
 | `fail-on`        | No       | `breaking`   | Severity threshold for failure: `safe`, `warning`, `breaking` |
 | `comment-on-pr`  | No       | `true`       | Post diff as a PR comment                                 |
 | `github-token`   | No       | `github.token` | GitHub token for PR comments                            |
@@ -71,3 +73,17 @@ npx mcpdiff snapshot --command node --args server.js -o contracts/baseline.mcpc.
 ```
 
 Commit this file to your repository and reference it in the `baseline` input.
+
+## SSE Transport with Custom Headers
+
+```yaml
+- name: Check MCP contract (SSE)
+  uses: mcp-contracts/github-action@main
+  with:
+    baseline: contracts/baseline.mcpc.json
+    url: https://mcp.example.com/sse
+    sse: "true"
+    headers: |
+      Authorization: Bearer ${{ secrets.MCP_TOKEN }}
+    fail-on: breaking
+```

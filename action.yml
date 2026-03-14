@@ -17,6 +17,13 @@ inputs:
   url:
     description: "Server URL for streamable-http transport"
     required: false
+  sse:
+    description: "Use SSE transport instead of streamable-http (requires url)"
+    required: false
+    default: "false"
+  headers:
+    description: "Custom HTTP headers, one per line as 'Key: Value'"
+    required: false
   fail-on:
     description: "Severity threshold for failure: safe | warning | breaking"
     required: false
