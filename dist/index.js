@@ -31162,15 +31162,9 @@ function diffAdditionalProperties(toolName, basePath, beforeSchema, afterSchema)
   }
   return [];
 }
-function diffSchemas(toolName, beforeSchema, afterSchema, schemaKind, basePath = schemaKind) {
+function diffAddedProperties(toolName, basePath, afterProps, beforePropNames, afterRequired) {
   const changes = [];
-  const beforeProps = beforeSchema.properties ?? {};
-  const afterProps = afterSchema.properties ?? {};
-  const beforeRequired = new Set(beforeSchema.required ?? []);
-  const afterRequired = new Set(afterSchema.required ?? []);
-  const beforePropNames = new Set(Object.keys(beforeProps));
-  const afterPropNames = new Set(Object.keys(afterProps));
-  for (const prop of afterPropNames) {
+  for (const prop of Object.keys(afterProps)) {
     if (beforePropNames.has(prop)) continue;
     const isRequired = afterRequired.has(prop);
     changes.push({
@@ -31184,7 +31178,11 @@ function diffSchemas(toolName, beforeSchema, afterSchema, schemaKind, basePath =
       after: afterProps[prop]
     });
   }
-  for (const prop of beforePropNames) {
+  return changes;
+}
+function diffRemovedProperties(toolName, basePath, beforeProps, afterPropNames, beforeRequired) {
+  const changes = [];
+  for (const prop of Object.keys(beforeProps)) {
     if (afterPropNames.has(prop)) continue;
     const wasRequired = beforeRequired.has(prop);
     changes.push({
@@ -31198,7 +31196,20 @@ function diffSchemas(toolName, beforeSchema, afterSchema, schemaKind, basePath =
       before: beforeProps[prop]
     });
   }
-  for (const prop of beforePropNames) {
+  return changes;
+}
+function diffSchemas(toolName, beforeSchema, afterSchema, schemaKind, basePath = schemaKind) {
+  const beforeProps = beforeSchema.properties ?? {};
+  const afterProps = afterSchema.properties ?? {};
+  const beforeRequired = new Set(beforeSchema.required ?? []);
+  const afterRequired = new Set(afterSchema.required ?? []);
+  const beforePropNames = new Set(Object.keys(beforeProps));
+  const afterPropNames = new Set(Object.keys(afterProps));
+  const changes = [
+    ...diffAddedProperties(toolName, basePath, afterProps, beforePropNames, afterRequired),
+    ...diffRemovedProperties(toolName, basePath, beforeProps, afterPropNames, beforeRequired)
+  ];
+  for (const prop of Object.keys(beforeProps)) {
     if (!afterPropNames.has(prop)) continue;
     const beforeProp = beforeProps[prop];
     const afterProp = afterProps[prop];
@@ -31251,12 +31262,8 @@ function diffOutputSchema(toolName, beforeOutput, afterOutput) {
   if (beforeOutput === void 0 || afterOutput === void 0) return [];
   return diffOutputSchemaFields(toolName, beforeOutput, afterOutput);
 }
-function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
+function diffAddedOutputFields(toolName, afterProps, beforeProps, afterRequired) {
   const changes = [];
-  const beforeProps = beforeOutput.properties ?? {};
-  const afterProps = afterOutput.properties ?? {};
-  const beforeRequired = new Set(beforeOutput.required ?? []);
-  const afterRequired = new Set(afterOutput.required ?? []);
   for (const prop of Object.keys(afterProps)) {
     if (prop in beforeProps) continue;
     changes.push({
@@ -31270,6 +31277,10 @@ function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
       after: afterProps[prop]
     });
   }
+  return changes;
+}
+function diffRemovedOutputFields(toolName, beforeProps, afterProps, beforeRequired) {
+  const changes = [];
   for (const prop of Object.keys(beforeProps)) {
     if (prop in afterProps) continue;
     changes.push({
@@ -31283,6 +31294,10 @@ function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
       before: beforeProps[prop]
     });
   }
+  return changes;
+}
+function diffModifiedOutputFields(toolName, beforeProps, afterProps) {
+  const changes = [];
   for (const prop of Object.keys(beforeProps)) {
     if (!(prop in afterProps)) continue;
     const bProp = beforeProps[prop];
@@ -31305,6 +31320,17 @@ function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
     }
   }
   return changes;
+}
+function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
+  const beforeProps = beforeOutput.properties ?? {};
+  const afterProps = afterOutput.properties ?? {};
+  const beforeRequired = new Set(beforeOutput.required ?? []);
+  const afterRequired = new Set(afterOutput.required ?? []);
+  return [
+    ...diffAddedOutputFields(toolName, afterProps, beforeProps, afterRequired),
+    ...diffRemovedOutputFields(toolName, beforeProps, afterProps, beforeRequired),
+    ...diffModifiedOutputFields(toolName, beforeProps, afterProps)
+  ];
 }
 var SEVERITY_ORDER = {
   safe: 0,
@@ -47916,7 +47942,7 @@ function readBaseline(filePath) {
   return data;
 }
 async function connectToServer(options) {
-  const client = new Client({ name: "mcp-contracts-action", version: "0.2.0" });
+  const client = new Client({ name: "mcp-contracts-action", version: "0.3.0" });
   let transport;
   let transportType;
   if (options.command) {
@@ -48071,7 +48097,7 @@ async function run() {
     const capture = {
       transport: connection.transportType,
       source,
-      tool: "mcp-contracts-action/0.2.0"
+      tool: "mcp-contracts-action/0.3.0"
     };
     const current = createSnapshot({
       server,
