@@ -28,6 +28,13 @@ inputs:
     description: "Severity threshold for failure: safe | warning | breaking"
     required: false
     default: "breaking"
+  verify-signature:
+    description: "Require valid signature on baseline before diffing (true/false)"
+    required: false
+    default: "false"
+  signature-key:
+    description: "Public key PEM content or file path for signature verification"
+    required: false
   comment-on-pr:
     description: "Post diff as a PR comment (true/false)"
     required: false

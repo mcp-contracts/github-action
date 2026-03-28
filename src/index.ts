@@ -12,7 +12,14 @@ import type {
 	SnapshotCapture,
 	SnapshotServer,
 } from "@mcp-contracts/core";
-import { createSnapshot, diffSnapshots, formatMarkdown, SEVERITY_ORDER } from "@mcp-contracts/core";
+import {
+	createSnapshot,
+	diffSnapshots,
+	formatMarkdown,
+	parseSignatureFile,
+	SEVERITY_ORDER,
+	verifySignature,
+} from "@mcp-contracts/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -69,7 +76,7 @@ async function connectToServer(options: {
 	transportType: string;
 	protocolVersion: string;
 }> {
-	const client = new Client({ name: "mcp-contracts-action", version: "0.3.0" });
+	const client = new Client({ name: "mcp-contracts-action", version: "0.4.0" });
 
 	let transport: Transport;
 	let transportType: string;
@@ -244,6 +251,32 @@ export async function run(): Promise<void> {
 		// Read baseline
 		const baseline = readBaseline(baselinePath);
 
+		// Verify baseline signature if requested
+		const verifySignatureFlag = core.getBooleanInput("verify-signature");
+		if (verifySignatureFlag) {
+			const signatureKeyInput = core.getInput("signature-key", { required: true });
+
+			// Resolve key: PEM content directly or file path
+			const keyPem = signatureKeyInput.startsWith("-----BEGIN")
+				? signatureKeyInput
+				: readFileSync(signatureKeyInput, "utf-8");
+
+			// Derive signature file path
+			const sigPath = baselinePath.endsWith(".mcpc.json")
+				? `${baselinePath.slice(0, -".mcpc.json".length)}.mcpc.sig`
+				: `${baselinePath}.sig`;
+
+			const sigJson = readFileSync(sigPath, "utf-8");
+			const sig = parseSignatureFile(sigJson);
+			const result = verifySignature(baseline, sig, keyPem);
+
+			if (!result.valid) {
+				throw new Error(`Baseline signature verification failed: ${result.error}`);
+			}
+
+			core.info("Baseline signature verified");
+		}
+
 		// Connect and capture
 		const connection = await connectToServer({
 			command,
@@ -274,7 +307,7 @@ export async function run(): Promise<void> {
 		const capture: SnapshotCapture = {
 			transport: connection.transportType,
 			source,
-			tool: "mcp-contracts-action/0.3.0",
+			tool: "mcp-contracts-action/0.4.0",
 		};
 
 		const current = createSnapshot({
