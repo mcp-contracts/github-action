@@ -56463,7 +56463,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var ACTION_VERSION = "0.7.3";
+var ACTION_VERSION = "0.5.0";
 var ACTION_TOOL = `mcp-contracts-action/${ACTION_VERSION}`;
 
 // src/mcp-client.ts
