@@ -1,370 +1,280 @@
-import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import type {
-	DiffReport,
-	MCPContractSnapshot,
-	RawPrompt,
-	RawResource,
-	RawResourceTemplate,
-	RawTool,
-	Severity,
-	SnapshotCapture,
-	SnapshotServer,
-} from "@mcp-contracts/core";
+import type { Severity } from "@mcp-contracts/core";
 import {
-	createSnapshot,
+	createWebhookPayload,
 	diffSnapshots,
+	formatCollisionsMarkdown,
+	formatCompositionMarkdown,
 	formatMarkdown,
-	parseSignatureFile,
 	SEVERITY_ORDER,
-	verifySignature,
 } from "@mcp-contracts/core";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { readBaseline, verifyBaselineSignature } from "./baseline.js";
 import { postOrUpdatePRComment } from "./comment.js";
+import { compositionHasFailure, runComposition } from "./composition.js";
+import type { ResolvedTransport } from "./mcp-client.js";
+import { captureSnapshot } from "./mcp-client.js";
+import {
+	DEFAULT_BASELINE_PATH,
+	loadProjectConfig,
+	resolveProjectPath,
+	resolveProjectTransport,
+} from "./project-config.js";
+import { sendWebhook } from "./webhook.js";
 
 const VALID_SEVERITIES = new Set<string>(["safe", "warning", "breaking"]);
 
-/**
- * Reads and validates a baseline snapshot file.
- *
- * @param filePath - Path to the .mcpc.json file.
- * @returns The parsed snapshot object.
- */
-function readBaseline(filePath: string): MCPContractSnapshot {
-	const raw = readFileSync(filePath, "utf-8");
-	const data = JSON.parse(raw) as Record<string, unknown>;
-
-	if (typeof data["snapshotVersion"] !== "string") {
-		throw new Error(`Invalid baseline: missing "snapshotVersion"`);
-	}
-	if (typeof data["contentHash"] !== "string" || !data["contentHash"].startsWith("sha256:")) {
-		throw new Error(`Invalid baseline: missing or invalid "contentHash"`);
-	}
-
-	return data as unknown as MCPContractSnapshot;
-}
-
-/** Data captured from a live MCP server. */
-interface CapturedData {
-	tools: RawTool[];
-	resources: RawResource[];
-	resourceTemplates: RawResourceTemplate[];
-	prompts: RawPrompt[];
+/** Parsed and validated action inputs. */
+interface ActionInputs {
+	baseline: string | undefined;
+	command: string | undefined;
+	args: string[] | undefined;
+	url: string | undefined;
+	sse: boolean;
+	headers: Record<string, string> | undefined;
+	config: string | undefined;
+	project: string | undefined;
+	failOn: string | undefined;
+	checkConflicts: boolean;
+	webhook: string | undefined;
+	verifySignature: boolean;
+	signatureKey: string | undefined;
 }
 
 /**
- * Connects to an MCP server and returns the client and transport.
+ * Reads and validates all action inputs.
  *
- * @param options - Connection options (command or url).
- * @returns The connected client and transport.
+ * @returns The parsed inputs.
  */
-async function connectToServer(options: {
-	command?: string;
-	args?: string[];
-	url?: string;
-	sse?: boolean;
-	headers?: Record<string, string>;
-}): Promise<{
-	client: Client;
-	transport: Transport;
-	transportType: string;
-	protocolVersion: string;
-}> {
-	const client = new Client({ name: "mcp-contracts-action", version: "0.4.0" });
-
-	let transport: Transport;
-	let transportType: string;
-
-	if (options.command) {
-		const args = options.args ?? [];
-		transport = new StdioClientTransport({ command: options.command, args });
-		transportType = "stdio";
-	} else if (options.url && options.sse) {
-		const opts = options.headers ? { requestInit: { headers: options.headers } } : {};
-		transport = new SSEClientTransport(new URL(options.url), opts);
-		transportType = "sse";
-	} else if (options.url) {
-		const opts = options.headers ? { requestInit: { headers: options.headers } } : undefined;
-		transport = opts
-			? new StreamableHTTPClientTransport(new URL(options.url), opts)
-			: new StreamableHTTPClientTransport(new URL(options.url));
-		transportType = "streamable-http";
-	} else {
-		throw new Error("Either 'command' or 'url' input is required");
+function readInputs(): ActionInputs {
+	const headersRaw = core.getMultilineInput("headers", { required: false });
+	const headers: Record<string, string> = {};
+	for (const line of headersRaw) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		const idx = trimmed.indexOf(":");
+		if (idx === -1) {
+			throw new Error(`Invalid header line (expected "Key: Value"): ${trimmed}`);
+		}
+		headers[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
 	}
 
-	await client.connect(transport, { signal: AbortSignal.timeout(30_000) });
+	const failOn = core.getInput("fail-on") || undefined;
+	if (failOn && !VALID_SEVERITIES.has(failOn)) {
+		throw new Error(`Invalid fail-on value "${failOn}". Must be one of: safe, warning, breaking`);
+	}
+
+	const sse = core.getBooleanInput("sse");
+	const url = core.getInput("url") || undefined;
+	if (sse && !url) {
+		throw new Error("'sse' requires 'url' to be set");
+	}
+
+	const argsStr = core.getInput("args") || undefined;
 
 	return {
-		client,
-		transport,
-		transportType,
-		protocolVersion: LATEST_PROTOCOL_VERSION,
+		baseline: core.getInput("baseline") || undefined,
+		command: core.getInput("command") || undefined,
+		args: argsStr ? argsStr.split(/\s+/) : undefined,
+		url,
+		sse,
+		headers: Object.keys(headers).length > 0 ? headers : undefined,
+		config: core.getInput("config") || undefined,
+		project: core.getInput("project") || undefined,
+		failOn,
+		checkConflicts: core.getBooleanInput("check-conflicts"),
+		webhook: core.getInput("webhook") || undefined,
+		verifySignature: core.getBooleanInput("verify-signature"),
+		signatureKey:
+			core.getInput("signature-key") || process.env["MCP_SIGNATURE_KEY"] || undefined,
 	};
 }
 
 /**
- * Captures tools, resources, and prompts from a connected MCP server.
+ * Writes the step summary and optionally posts the report as a PR comment.
  *
- * @param client - The connected MCP client.
- * @returns Captured server data.
+ * @param markdown - The formatted report.
  */
-async function captureData(client: Client): Promise<CapturedData> {
-	const capabilities = client.getServerCapabilities() ?? {};
+async function publishReport(markdown: string): Promise<void> {
+	core.summary.addRaw(markdown);
+	await core.summary.write();
 
-	const tools: RawTool[] = [];
-	const resources: RawResource[] = [];
-	const resourceTemplates: RawResourceTemplate[] = [];
-	const prompts: RawPrompt[] = [];
-
-	if (capabilities.tools) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listTools(cursor ? { cursor } : undefined);
-			for (const tool of result.tools) {
-				tools.push({
-					name: tool.name,
-					description: tool.description,
-					inputSchema: tool.inputSchema as RawTool["inputSchema"],
-					...(tool.outputSchema && {
-						outputSchema: tool.outputSchema as Record<string, unknown>,
-					}),
-					...(tool.annotations && {
-						annotations: tool.annotations as Record<string, unknown>,
-					}),
-				});
+	const commentOnPr = core.getBooleanInput("comment-on-pr");
+	if (commentOnPr && github.context.eventName === "pull_request") {
+		const token = core.getInput("github-token", { required: false }) || process.env["GITHUB_TOKEN"];
+		if (token) {
+			const prNumber = github.context.payload.pull_request?.number;
+			if (prNumber) {
+				await postOrUpdatePRComment(markdown, token, prNumber);
 			}
-			cursor = result.nextCursor;
-		} while (cursor);
+		} else {
+			core.warning("No GitHub token available — skipping PR comment");
+		}
 	}
-
-	if (capabilities.resources) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listResources(cursor ? { cursor } : undefined);
-			for (const resource of result.resources) {
-				resources.push({
-					uri: resource.uri,
-					name: resource.name,
-					description: resource.description,
-					mimeType: resource.mimeType,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
-
-		cursor = undefined;
-		do {
-			const result = await client.listResourceTemplates(cursor ? { cursor } : undefined);
-			for (const template of result.resourceTemplates) {
-				resourceTemplates.push({
-					uriTemplate: template.uriTemplate,
-					name: template.name,
-					description: template.description,
-					mimeType: template.mimeType,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
-	}
-
-	if (capabilities.prompts) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listPrompts(cursor ? { cursor } : undefined);
-			for (const prompt of result.prompts) {
-				prompts.push({
-					name: prompt.name,
-					description: prompt.description,
-					arguments: prompt.arguments,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
-	}
-
-	return { tools, resources, resourceTemplates, prompts };
 }
 
 /**
- * Checks whether any changes meet the fail-on severity threshold.
+ * Runs composition mode: diffs every server in an mcp.json config against
+ * its baseline in the baseline directory.
  *
- * @param report - The diff report to check.
- * @param failOn - The severity threshold.
- * @returns True if any change meets or exceeds the threshold.
+ * @param inputs - The parsed action inputs.
  */
-function exceedsThreshold(report: DiffReport, failOn: Severity): boolean {
+async function runCompositionMode(inputs: ActionInputs): Promise<void> {
+	if (!inputs.baseline) {
+		throw new Error("'baseline' must point to a baseline directory when 'config' is set");
+	}
+	if (inputs.verifySignature) {
+		throw new Error("'verify-signature' is not supported in composition mode");
+	}
+	if (inputs.webhook) {
+		core.warning("'webhook' is ignored in composition mode");
+	}
+	const failOn = (inputs.failOn ?? "breaking") as Severity;
+
+	const { report, collisions, captureFailures } = await runComposition(
+		inputs.config as string,
+		inputs.baseline,
+		inputs.checkConflicts,
+	);
+
+	let markdown = formatCompositionMarkdown(report);
+	if (collisions) {
+		markdown += `\n${formatCollisionsMarkdown(collisions)}`;
+	}
+	await publishReport(markdown);
+
+	const hasConflicts = (collisions?.summary.conflicting ?? 0) > 0;
+	const shouldFail = compositionHasFailure(report, failOn);
+
+	core.setOutput("has-changes", String(report.summary.total > 0));
+	core.setOutput("has-breaking", String(report.summary.breaking > 0 || report.summary.missingServers > 0));
+	core.setOutput("has-conflicts", String(hasConflicts));
+	core.setOutput("summary", JSON.stringify(report.summary));
+	core.setOutput("exit-code", shouldFail || hasConflicts || captureFailures.length > 0 ? "1" : "0");
+
+	if (captureFailures.length > 0) {
+		const failed = captureFailures.map((f) => `${f.serverName} (${f.error})`).join(", ");
+		core.setFailed(`Failed to capture ${captureFailures.length} server(s): ${failed}`);
+		return;
+	}
+	if (hasConflicts) {
+		core.setFailed("Conflicting tool names detected across servers");
+		return;
+	}
+	if (shouldFail) {
+		core.setFailed(`MCP contract changes at or above "${failOn}" severity detected`);
+	}
+}
+
+/**
+ * Runs single-server mode: captures one server and diffs it against a
+ * baseline snapshot file.
+ *
+ * @param inputs - The parsed action inputs.
+ */
+async function runSingleServerMode(inputs: ActionInputs): Promise<void> {
+	const workspace = process.env["GITHUB_WORKSPACE"] || process.cwd();
+
+	let transport: ResolvedTransport;
+	let baselinePath: string;
+	let failOn: Severity;
+
+	if (inputs.command || inputs.url) {
+		transport = inputs.command
+			? { transport: "stdio", command: inputs.command, args: inputs.args }
+			: {
+					transport: inputs.sse ? "sse" : "streamable-http",
+					url: inputs.url,
+					headers: inputs.headers,
+				};
+		const project = loadProjectConfig(inputs.project, workspace);
+		baselinePath =
+			inputs.baseline ??
+			(project?.config.baseline
+				? resolveProjectPath(project, project.config.baseline)
+				: resolve(workspace, DEFAULT_BASELINE_PATH));
+		failOn = (inputs.failOn ?? project?.config.failOn ?? "breaking") as Severity;
+	} else {
+		const project = loadProjectConfig(inputs.project, workspace);
+		if (!project?.config.server) {
+			throw new Error(
+				"Provide 'command', 'url', or 'config' inputs — or add an mcpcontracts.json with a \"server\" block to the repository",
+			);
+		}
+		transport = resolveProjectTransport(project);
+		baselinePath =
+			inputs.baseline ??
+			(project.config.baseline
+				? resolveProjectPath(project, project.config.baseline)
+				: resolve(workspace, DEFAULT_BASELINE_PATH));
+		failOn = (inputs.failOn ?? project.config.failOn ?? "breaking") as Severity;
+	}
+
+	const baseline = readBaseline(baselinePath);
+
+	if (inputs.verifySignature) {
+		if (!inputs.signatureKey) {
+			throw new Error(
+				"'verify-signature' requires 'signature-key' (or the MCP_SIGNATURE_KEY environment variable)",
+			);
+		}
+		verifyBaselineSignature(baseline, baselinePath, inputs.signatureKey);
+		core.info("Baseline signature verified");
+	}
+
+	const current = await captureSnapshot(transport);
+	const report = diffSnapshots(baseline, current);
+
+	await publishReport(formatMarkdown(report));
+
+	if (inputs.webhook) {
+		const serverSource =
+			transport.transport === "stdio"
+				? [transport.command, ...(transport.args ?? [])].join(" ")
+				: transport.url;
+		const payload = createWebhookPayload(report, {
+			trigger: "ci",
+			baselinePath,
+			serverSource,
+		});
+		const result = await sendWebhook(inputs.webhook, payload);
+		if (result.success) {
+			core.info(`Webhook delivered (HTTP ${result.statusCode})`);
+		} else {
+			core.warning(`Webhook delivery failed: ${result.error}`);
+		}
+	}
+
 	const threshold = SEVERITY_ORDER[failOn];
-	return report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
+	const shouldFail = report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
+
+	core.setOutput("has-changes", String(report.changes.length > 0));
+	core.setOutput("has-breaking", String(report.summary.breaking > 0));
+	core.setOutput("has-conflicts", "false");
+	core.setOutput("summary", JSON.stringify(report.summary));
+	core.setOutput("exit-code", shouldFail ? "1" : "0");
+
+	if (shouldFail) {
+		core.setFailed(`MCP contract changes at or above "${failOn}" severity detected`);
+	}
 }
 
 /**
  * Main entry point for the GitHub Action.
  *
- * Reads inputs, connects to MCP server, diffs against baseline,
- * sets outputs, writes step summary, and optionally fails the action.
+ * Reads inputs, dispatches to single-server or composition mode, sets
+ * outputs, writes the step summary, and optionally fails the action.
  */
 export async function run(): Promise<void> {
-	let transport: Transport | undefined;
-
 	try {
-		// Read inputs
-		const baselinePath = core.getInput("baseline", { required: true });
-		const command = core.getInput("command") || undefined;
-		const argsStr = core.getInput("args") || undefined;
-		const url = core.getInput("url") || undefined;
-		const sse = core.getBooleanInput("sse");
-		const headersRaw = core.getMultilineInput("headers", { required: false });
-		const failOnStr = core.getInput("fail-on") || "breaking";
-
-		if (sse && !url) {
-			throw new Error("'sse' requires 'url' to be set");
-		}
-
-		const headers: Record<string, string> = {};
-		for (const line of headersRaw) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			const idx = trimmed.indexOf(":");
-			if (idx === -1) {
-				throw new Error(`Invalid header line (expected "Key: Value"): ${trimmed}`);
-			}
-			headers[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
-		}
-		const parsedHeaders = Object.keys(headers).length > 0 ? headers : undefined;
-
-		if (!VALID_SEVERITIES.has(failOnStr)) {
-			throw new Error(
-				`Invalid fail-on value "${failOnStr}". Must be one of: safe, warning, breaking`,
-			);
-		}
-		const failOn = failOnStr as Severity;
-
-		const args = argsStr ? argsStr.split(/\s+/) : undefined;
-
-		// Read baseline
-		const baseline = readBaseline(baselinePath);
-
-		// Verify baseline signature if requested
-		const verifySignatureFlag = core.getBooleanInput("verify-signature");
-		if (verifySignatureFlag) {
-			const signatureKeyInput = core.getInput("signature-key", { required: true });
-
-			// Resolve key: PEM content directly or file path
-			const keyPem = signatureKeyInput.startsWith("-----BEGIN")
-				? signatureKeyInput
-				: readFileSync(signatureKeyInput, "utf-8");
-
-			// Derive signature file path
-			const sigPath = baselinePath.endsWith(".mcpc.json")
-				? `${baselinePath.slice(0, -".mcpc.json".length)}.mcpc.sig`
-				: `${baselinePath}.sig`;
-
-			const sigJson = readFileSync(sigPath, "utf-8");
-			const sig = parseSignatureFile(sigJson);
-			const result = verifySignature(baseline, sig, keyPem);
-
-			if (!result.valid) {
-				throw new Error(`Baseline signature verification failed: ${result.error}`);
-			}
-
-			core.info("Baseline signature verified");
-		}
-
-		// Connect and capture
-		const connection = await connectToServer({
-			command,
-			args,
-			url,
-			sse,
-			headers: parsedHeaders,
-		});
-		transport = connection.transport;
-
-		const serverVersion = connection.client.getServerVersion();
-		const serverCapabilities = connection.client.getServerCapabilities() ?? {};
-
-		const data = await captureData(connection.client);
-		await transport.close();
-		transport = undefined;
-
-		// Create current snapshot
-		const server: SnapshotServer = {
-			name: serverVersion?.name ?? "unknown",
-			version: serverVersion?.version ?? "unknown",
-			protocolVersion: connection.protocolVersion,
-			capabilities: serverCapabilities as Record<string, unknown>,
-		};
-
-		const source = command ? [command, ...(args ?? [])].join(" ") : url;
-
-		const capture: SnapshotCapture = {
-			transport: connection.transportType,
-			source,
-			tool: "mcp-contracts-action/0.4.0",
-		};
-
-		const current = createSnapshot({
-			server,
-			tools: data.tools,
-			resources: data.resources,
-			resourceTemplates: data.resourceTemplates,
-			prompts: data.prompts,
-			capture,
-		});
-
-		// Diff
-		const report = diffSnapshots(baseline, current);
-
-		// Format as markdown
-		const markdown = formatMarkdown(report);
-
-		// Write step summary
-		core.summary.addRaw(markdown);
-		await core.summary.write();
-
-		// PR comment
-		const commentOnPr = core.getBooleanInput("comment-on-pr");
-		if (commentOnPr && github.context.eventName === "pull_request") {
-			const token =
-				core.getInput("github-token", { required: false }) || process.env["GITHUB_TOKEN"];
-			if (token) {
-				const prNumber = github.context.payload.pull_request?.number;
-				if (prNumber) {
-					await postOrUpdatePRComment(markdown, token, prNumber);
-				}
-			} else {
-				core.warning("No GitHub token available — skipping PR comment");
-			}
-		}
-
-		// Set outputs
-		const hasChanges = report.changes.length > 0;
-		const hasBreaking = report.summary.breaking > 0;
-		const shouldFail = exceedsThreshold(report, failOn);
-
-		core.setOutput("has-changes", String(hasChanges));
-		core.setOutput("has-breaking", String(hasBreaking));
-		core.setOutput("summary", JSON.stringify(report.summary));
-		core.setOutput("exit-code", shouldFail ? "1" : "0");
-
-		if (shouldFail) {
-			core.setFailed("Breaking MCP contract changes detected");
+		const inputs = readInputs();
+		if (inputs.config) {
+			await runCompositionMode(inputs);
+		} else {
+			await runSingleServerMode(inputs);
 		}
 	} catch (error) {
-		if (transport) {
-			try {
-				await transport.close();
-			} catch {
-				// ignore close errors
-			}
-		}
 		const message = error instanceof Error ? error.message : String(error);
 		core.setFailed(message);
 	}

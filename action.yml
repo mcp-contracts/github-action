@@ -6,8 +6,11 @@ branding:
 
 inputs:
   baseline:
-    description: "Path to baseline snapshot (.mcpc.json)"
-    required: true
+    description: >-
+      Path to baseline snapshot (.mcpc.json). With 'config', a directory of
+      baseline snapshots instead. Defaults to the 'baseline' from
+      mcpcontracts.json, or contracts/baseline.mcpc.json.
+    required: false
   command:
     description: "Server command to run via stdio (e.g., 'node dist/index.js')"
     required: false
@@ -24,16 +27,33 @@ inputs:
   headers:
     description: "Custom HTTP headers, one per line as 'Key: Value'"
     required: false
-  fail-on:
-    description: "Severity threshold for failure: safe | warning | breaking"
+  config:
+    description: >-
+      Path to an mcp.json config. Enables composition mode: every server in
+      the config is diffed against its baseline in the 'baseline' directory.
     required: false
-    default: "breaking"
+  project:
+    description: >-
+      Path to mcpcontracts.json. When no transport inputs are given, the
+      project config supplies the server and baseline (auto-discovered at
+      the workspace root by default).
+    required: false
+  fail-on:
+    description: "Severity threshold for failure: safe | warning | breaking (default: breaking, or the project config's failOn)"
+    required: false
+  check-conflicts:
+    description: "Composition mode: detect duplicate tool names across servers and fail on conflicting schemas (true/false)"
+    required: false
+    default: "false"
+  webhook:
+    description: "URL to POST the diff report to as JSON (single-server mode)"
+    required: false
   verify-signature:
     description: "Require valid signature on baseline before diffing (true/false)"
     required: false
     default: "false"
   signature-key:
-    description: "Public key PEM content or file path for signature verification"
+    description: "Public key PEM content or file path for signature verification (falls back to MCP_SIGNATURE_KEY)"
     required: false
   comment-on-pr:
     description: "Post diff as a PR comment (true/false)"
@@ -49,6 +69,8 @@ outputs:
     description: "Whether any changes were detected (true/false)"
   has-breaking:
     description: "Whether breaking changes were detected (true/false)"
+  has-conflicts:
+    description: "Whether conflicting tool names were detected across servers (true/false)"
   summary:
     description: "JSON summary object with change counts"
   exit-code:
