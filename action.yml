@@ -12,7 +12,7 @@ inputs:
       mcpcontracts.json, or contracts/baseline.mcpc.json.
     required: false
   command:
-    description: "Server command to run via stdio (e.g., 'node dist/index.js')"
+    description: "Server command to run via stdio, may include arguments (e.g., 'node dist/index.js')"
     required: false
   args:
     description: "Arguments for the server command (space-separated)"
