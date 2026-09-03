@@ -8,6 +8,7 @@ import {
 	formatCollisionsMarkdown,
 	formatCompositionMarkdown,
 	formatMarkdown,
+	resolveCommandString,
 	SEVERITY_ORDER,
 } from "@mcp-contracts/core";
 import { readBaseline, verifyBaselineSignature } from "./baseline.js";
@@ -182,7 +183,7 @@ async function runSingleServerMode(inputs: ActionInputs): Promise<void> {
 
 	if (inputs.command || inputs.url) {
 		transport = inputs.command
-			? { transport: "stdio", command: inputs.command, args: inputs.args }
+			? { transport: "stdio", ...resolveCommandString(inputs.command, inputs.args) }
 			: {
 					transport: inputs.sse ? "sse" : "streamable-http",
 					url: inputs.url,
