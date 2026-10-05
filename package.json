@@ -9,7 +9,7 @@
   "dependencies": {
     "@actions/core": "^3.0.0",
     "@actions/github": "^9.0.0",
-    "@mcp-contracts/core": "^0.8.0",
+    "@mcp-contracts/core": "^0.8.1",
     "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "devDependencies": {
