@@ -20072,6 +20072,17 @@ function prefixIssues(path, issues) {
 function unwrapMessage(message) {
 	return typeof message === "string" ? message : message?.message;
 }
+/** The leading size checks of `defChecks` that set an upper bound, each paired with it. */
+function sizeCaps(defChecks) {
+	const caps = [];
+	for (const ch of defChecks ?? []) {
+		const d = ch._zod.def;
+		if (!/_(length|size)$|_equals$/.test(d.check)) break;
+		const max = d.maximum ?? d.length ?? d.size;
+		if (max >= 0) caps.push([max, ch]);
+	}
+	return caps;
+}
 function attachSchema(issues, start, inst) {
 	var _a;
 	for (let i = start; i < issues.length; i++) (_a = issues[i]).schema ?? (_a.schema = inst);
@@ -21123,7 +21134,7 @@ var Doc = class {
 const version = {
 	major: 4,
 	minor: 6,
-	patch: 5
+	patch: 7
 };
 //#endregion
 //#region node_modules/zod/v4/core/schemas.js
@@ -21643,6 +21654,26 @@ const $ZodNever = /*@__PURE__*/ $constructor("$ZodNever", (inst, def) => {
 		return payload;
 	};
 });
+function capSize(inst, size) {
+	const caps = sizeCaps(inst._zod.def.checks);
+	if (!caps.length) return;
+	const cap = Math.min(...caps.map((c) => c[0]));
+	const parse = inst._zod.parse;
+	inst._zod.parse = (payload, ctx) => {
+		const n = size(payload.value);
+		if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
+			for (const [max, ch] of sizeCaps(inst._zod.def.checks)) if (n > max && ch._zod.def.when(payload)) {
+				const start = payload.issues.length;
+				ch._zod.check(payload);
+				payload.issues[start].continue = false;
+				attachSchema(payload.issues, start, inst);
+				return payload;
+			}
+		}
+		return parse(payload, ctx);
+	};
+}
+const arraySize = (input) => Array.isArray(input) ? input.length : -1;
 function handleArrayResult(result, final, index) {
 	if (result.issues.length) final.issues.push(...prefixIssues(index, result.issues));
 	final.value[index] = result.value;
@@ -21680,6 +21711,7 @@ const $ZodArray = /*@__PURE__*/ $constructor("$ZodArray", (inst, def) => {
 		if (proms.length) return Promise.all(proms).then(() => payload);
 		return payload;
 	};
+	capSize(inst, arraySize);
 });
 function handlePropertyResult(result, final, key, input, optin, optout) {
 	const isPresent = key in input;
@@ -21788,7 +21820,7 @@ const $ZodObject = /*@__PURE__*/ $constructor("$ZodObject", (inst, def) => {
 		}
 		return propValues;
 	});
-	const isObject$2 = isObject;
+	const isObject$1 = isObject;
 	const catchall = def.catchall;
 	let value;
 	const memo = globalConfig.memoizer;
@@ -21796,7 +21828,7 @@ const $ZodObject = /*@__PURE__*/ $constructor("$ZodObject", (inst, def) => {
 	inst._zod.parse = (payload, ctx) => {
 		value ?? (value = _normalized.value);
 		const input = payload.value;
-		if (!isObject$2(input)) {
+		if (!isObject$1(input)) {
 			payload.issues.push({
 				expected: "object",
 				code: "invalid_type",
@@ -21926,7 +21958,7 @@ const $ZodObjectJIT = /*@__PURE__*/ $constructor("$ZodObjectJIT", (inst, def) =>
 		return doc.compile();
 	};
 	let fastpass;
-	const isObject$1 = isObject;
+	const isObject$2 = isObject;
 	const jit = !globalConfig.jitless;
 	const fastEnabled = jit && allowsEval.value;
 	const catchall = def.catchall;
@@ -21934,7 +21966,7 @@ const $ZodObjectJIT = /*@__PURE__*/ $constructor("$ZodObjectJIT", (inst, def) =>
 	inst._zod.parse = (payload, ctx) => {
 		value ?? (value = _normalized.value);
 		const input = payload.value;
-		if (!isObject$1(input)) {
+		if (!isObject$2(input)) {
 			payload.issues.push({
 				expected: "object",
 				code: "invalid_type",
@@ -29194,6 +29226,7 @@ var Protocol = class {
 			this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
 				const handleTaskResult = async () => {
 					const taskId = request.params.taskId;
+					if (!await this._taskStore.getTask(taskId, extra.sessionId)) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
 					if (this._taskMessageQueue) {
 						let queuedMessage;
 						while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
@@ -29220,12 +29253,12 @@ var Protocol = class {
 					const task = await this._taskStore.getTask(taskId, extra.sessionId);
 					if (!task) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
 					if (!isTerminal(task.status)) {
-						await this._waitForTaskUpdate(taskId, extra.signal);
+						await this._waitForTaskUpdate(taskId, extra.signal, extra.sessionId);
 						return await handleTaskResult();
 					}
 					if (isTerminal(task.status)) {
 						const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
-						this._clearTaskQueue(taskId);
+						this._clearTaskQueue(taskId, extra.sessionId);
 						return {
 							...result,
 							_meta: {
@@ -29256,7 +29289,7 @@ var Protocol = class {
 					if (!task) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${request.params.taskId}`);
 					if (isTerminal(task.status)) throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
 					await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
-					this._clearTaskQueue(request.params.taskId);
+					this._clearTaskQueue(request.params.taskId, extra.sessionId);
 					const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
 					if (!cancelledTask) throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
 					return {
@@ -29361,6 +29394,17 @@ var Protocol = class {
 		const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
 		const capturedTransport = this._transport;
 		const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
+		const sessionId = capturedTransport?.sessionId;
+		const store = this._taskStore;
+		let relatedTaskFound = true;
+		let relatedTaskLookup;
+		if (relatedTaskId && store && this._taskMessageQueue && sessionId !== void 0) {
+			relatedTaskFound = false;
+			relatedTaskLookup = (async () => {
+				if (!await store.getTask(relatedTaskId, sessionId)) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${relatedTaskId}`);
+				relatedTaskFound = true;
+			})();
+		}
 		if (handler === void 0) {
 			const errorResponse = {
 				jsonrpc: "2.0",
@@ -29370,7 +29414,14 @@ var Protocol = class {
 					message: "Method not found"
 				}
 			};
-			if (relatedTaskId && this._taskMessageQueue) this._enqueueTaskMessage(relatedTaskId, {
+			if (relatedTaskId && relatedTaskLookup) {
+				const queuedError = {
+					type: "error",
+					message: errorResponse,
+					timestamp: Date.now()
+				};
+				relatedTaskLookup.then(() => this._enqueueTaskMessage(relatedTaskId, queuedError, sessionId), () => capturedTransport?.send(errorResponse)).catch((error) => this._onerror(/* @__PURE__ */ new Error(`Failed to send an error response: ${error}`)));
+			} else if (relatedTaskId && this._taskMessageQueue) this._enqueueTaskMessage(relatedTaskId, {
 				type: "error",
 				message: errorResponse,
 				timestamp: Date.now()
@@ -29412,7 +29463,8 @@ var Protocol = class {
 			closeSSEStream: extra?.closeSSEStream,
 			closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
 		};
-		Promise.resolve().then(() => {
+		(relatedTaskLookup ?? Promise.resolve()).then(() => {
+			if (relatedTaskLookup && abortController.signal.aborted) throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
 			if (taskCreationParams) this.assertTaskHandlerCapability(request.method);
 		}).then(() => handler(request, fullExtra)).then(async (result) => {
 			if (abortController.signal.aborted) return;
@@ -29438,7 +29490,7 @@ var Protocol = class {
 					...error["data"] !== void 0 && { data: error["data"] }
 				}
 			};
-			if (relatedTaskId && this._taskMessageQueue) await this._enqueueTaskMessage(relatedTaskId, {
+			if (relatedTaskId && this._taskMessageQueue && relatedTaskFound) await this._enqueueTaskMessage(relatedTaskId, {
 				type: "error",
 				message: errorResponse,
 				timestamp: Date.now()
@@ -29890,7 +29942,7 @@ var Protocol = class {
 	async _enqueueTaskMessage(taskId, message, sessionId) {
 		if (!this._taskStore || !this._taskMessageQueue) throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
 		const maxQueueSize = this._options?.maxTaskQueueSize;
-		await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+		await this._taskMessageQueue.enqueue(taskId, message, sessionId ?? this._transport?.sessionId, maxQueueSize);
 	}
 	/**
 	* Clears the message queue for a task and rejects any pending request resolvers.
@@ -29915,12 +29967,13 @@ var Protocol = class {
 	* Uses polling to check for updates at the task's configured poll interval.
 	* @param taskId The task ID to wait for
 	* @param signal Abort signal to cancel the wait
+	* @param sessionId Session of the request that waits, passed to the task store
 	* @returns Promise that resolves when an update occurs or rejects if aborted
 	*/
-	async _waitForTaskUpdate(taskId, signal) {
+	async _waitForTaskUpdate(taskId, signal, sessionId) {
 		let interval = this._options?.defaultTaskPollInterval ?? 1e3;
 		try {
-			const task = await this._taskStore?.getTask(taskId);
+			const task = await this._taskStore?.getTask(taskId, sessionId);
 			if (task?.pollInterval) interval = task.pollInterval;
 		} catch {}
 		return new Promise((resolve, reject) => {
@@ -37728,6 +37781,70 @@ function createFetchWithInit(baseFetch = fetch, baseInit) {
 		});
 	};
 }
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = [
+	301,
+	302,
+	303,
+	307,
+	308
+];
+/** @internal Whether `to` has the scheme, host and port of `from`, or is its https form with both on default ports. */
+function isWithinOrigin(from, to) {
+	if (from.protocol === to.protocol && from.hostname === to.hostname && from.port === to.port) return true;
+	return from.hostname === to.hostname && from.protocol === "http:" && from.port === "" && to.protocol === "https:" && to.port === "";
+}
+function redirectTarget(response, requestUrl) {
+	const location = REDIRECT_STATUSES.includes(response.status) ? response.headers.get("location") : null;
+	try {
+		return location ? new URL(location, requestUrl) : void 0;
+	} catch {
+		return;
+	}
+}
+/** @internal Follows the redirect in `response` while it stays within the origin of `url`; undefined when `response` is to be used as is. */
+function followWithinOrigin(baseFetch, url, init, response, followed = 0) {
+	const target = redirectTarget(response, url);
+	const keepsMethod = response.status === 307 || response.status === 308 || (init?.method ?? "GET").toUpperCase() === "GET";
+	if (!target || followed === MAX_REDIRECTS || !keepsMethod) return;
+	const from = new URL(url);
+	if ((target.username || target.password) && (target.username !== from.username || target.password !== from.password) || !isWithinOrigin(from, target)) return;
+	return Promise.resolve(response.body?.cancel()).then(() => baseFetch(target, {
+		...init,
+		redirect: "manual"
+	})).then((next) => followWithinOrigin(baseFetch, target, init, next, followed + 1) ?? next);
+}
+const followingFetches = /* @__PURE__ */ new WeakSet();
+/** @internal Wraps a fetch for `redirectPolicy: 'follow'`: `fetchWithinOrigin` returns the result as it is, so redirects are left to the fetch. */
+function fetchLeavingRedirects(baseFetch) {
+	const following = (url, init) => (baseFetch ?? fetch)(url, init);
+	followingFetches.add(following);
+	return following;
+}
+/** @internal Wraps a fetch so it follows a redirect only within the request's origin; any other redirect response is returned as is. */
+function fetchWithinOrigin(baseFetch = fetch) {
+	if (followingFetches.has(baseFetch)) return baseFetch;
+	return (url, init) => {
+		if (init?.redirect === "error" || init?.redirect === "manual") return baseFetch(url, init);
+		return Promise.resolve(baseFetch(url, {
+			...init,
+			redirect: "manual"
+		})).then((response) => followWithinOrigin(baseFetch, url, init, response) ?? response);
+	};
+}
+/** @internal Describes a redirect that `fetchWithinOrigin` returned unfollowed, naming its target without userinfo, query or fragment. */
+function unfollowedRedirect(response, requestUrl) {
+	if (response.type === "opaqueredirect") return "Redirect not followed: this runtime does not expose the redirect target";
+	const from = response.url || requestUrl;
+	const target = redirectTarget(response, from);
+	if (!target) return;
+	target.username = target.password = target.search = target.hash = "";
+	if (target.protocol === "http:" && new URL(from).protocol === "https:") {
+		target.protocol = "https:";
+		return `Redirect to plain http not followed; try ${target.href} instead`;
+	}
+	return `Redirect to ${target.href} not followed`;
+}
 //#endregion
 //#region node_modules/pkce-challenge/dist/index.node.js
 let crypto$1;
@@ -37898,7 +38015,12 @@ const OAuthTokensSchema = object({
 	token_type: string(),
 	expires_in: number().optional(),
 	scope: string().optional(),
-	refresh_token: string().optional()
+	refresh_token: string().optional(),
+	/**
+	* Not part of the wire format: the authorization server this value was obtained from, added by
+	* the client's `auth()` before it is stored and compared when it is read back.
+	*/
+	issuer: string().optional().catch(void 0)
 }).strip();
 /**
 * OAuth 2.1 error response
@@ -37940,7 +38062,12 @@ const OAuthClientInformationSchema = object({
 	client_id: string(),
 	client_secret: string().optional(),
 	client_id_issued_at: number$1().optional(),
-	client_secret_expires_at: number$1().optional()
+	client_secret_expires_at: number$1().optional(),
+	/**
+	* Not part of the wire format: the authorization server this value was obtained from, added by
+	* the client's `auth()` before it is stored and compared when it is read back.
+	*/
+	issuer: string().optional().catch(void 0)
 }).strip();
 /**
 * RFC 7591 OAuth 2.0 Dynamic Client Registration full response (client information plus metadata)
@@ -38242,8 +38369,40 @@ async function parseErrorResponse(input) {
 		const { error, error_description, error_uri } = OAuthErrorResponseSchema.parse(JSON.parse(body));
 		return new (OAUTH_ERRORS[error] || ServerError)(error_description || "", error_uri);
 	} catch (error) {
-		return new ServerError(`${statusCode ? `HTTP ${statusCode}: ` : ""}Invalid OAuth error response: ${error}. Raw body: ${body}`);
+		const redirect = input instanceof Response ? unfollowedRedirect(input, input.url) : void 0;
+		return new ServerError(`${statusCode ? `HTTP ${statusCode}: ` : ""}${redirect ?? `Invalid OAuth error response: ${error}. Raw body: ${body}`}`);
 	}
+}
+/**
+* Compares two authorization server identifiers, tolerating a single trailing `/`
+* difference (`String(new URL(...))` is slash-suffixed, advertised values often are not).
+*/
+function issuersMatch(a, b) {
+	let [x, y] = [a, b];
+	try {
+		[x, y] = [new URL(a).href, new URL(b).href];
+	} catch {}
+	return x === y || x.endsWith("/") && x.slice(0, -1) === y || y.endsWith("/") && y.slice(0, -1) === x;
+}
+/**
+* {@linkcode auth} stamps everything it passes to `saveClientInformation` / `saveTokens` with
+* `issuer`, the authorization server URL used for discovery. This returns `stored` unless its
+* stamp names a different authorization server, in which case the caller behaves as if nothing
+* were stored. A value without a stamp (saved by an earlier version) is returned as-is, and
+* is stamped once this authorization server has accepted it.
+*/
+function discardIfIssuerMismatch(stored, issuer) {
+	if (!stored) return void 0;
+	if (typeof stored.issuer !== "string") return stored.issuer == null ? stored : {
+		...stored,
+		issuer: void 0
+	};
+	return issuersMatch(stored.issuer, issuer) ? stored : void 0;
+}
+const TokenResponseSchema = OAuthTokensSchema.omit({ issuer: true });
+const RegistrationResponseSchema = OAuthClientInformationFullSchema.omit({ issuer: true });
+function boundElsewhereError(stored, issuer) {
+	return /* @__PURE__ */ new Error(`OAuth client information is bound to authorization server ${stored.issuer} and is not presented to ${issuer}. Clear the stored client information, or correct \`expectedIssuer\`, if the authorization server has moved.`);
 }
 /**
 * Orchestrates the full auth flow with a server.
@@ -38300,27 +38459,46 @@ async function authInternal(provider, { serverUrl, authorizationCode, scope, res
 			authorizationServerMetadata: metadata
 		});
 	}
-	const resource = await selectResourceURL(serverUrl, provider, resourceMetadata);
+	const issuer = String(authorizationServerUrl);
+	const selectedResource = await selectResourceURL(serverUrl, provider, resourceMetadata);
+	const resource = selectedResource && resourceMetadata && !provider.validateResourceURL ? resourceMetadata.resource : selectedResource;
 	const resolvedScope = scope || resourceMetadata?.scopes_supported?.join(" ") || provider.clientMetadata.scope;
-	let clientInformation = await Promise.resolve(provider.clientInformation());
+	const storedClientInformation = await Promise.resolve(provider.clientInformation());
+	let clientInformation = discardIfIssuerMismatch(storedClientInformation, issuer);
+	const canRegisterAgain = provider.saveClientInformation !== void 0 && !!provider.redirectUrl;
+	if (storedClientInformation && !clientInformation && !canRegisterAgain) throw boundElsewhereError(storedClientInformation, issuer);
+	const unstampedClientInformation = clientInformation?.issuer == null ? clientInformation : void 0;
+	const bindClientInformation = async () => {
+		try {
+			if (unstampedClientInformation) await provider.saveClientInformation?.({
+				...unstampedClientInformation,
+				issuer
+			});
+		} catch {}
+	};
 	if (!clientInformation) {
 		if (authorizationCode !== void 0) throw new Error("Existing OAuth client information is required when exchanging an authorization code");
 		const supportsUrlBasedClientId = metadata?.client_id_metadata_document_supported === true;
 		const clientMetadataUrl = provider.clientMetadataUrl;
 		if (clientMetadataUrl && !isHttpsUrl(clientMetadataUrl)) throw new InvalidClientMetadataError(`clientMetadataUrl must be a valid HTTPS URL with a non-root pathname, got: ${clientMetadataUrl}`);
 		if (supportsUrlBasedClientId && clientMetadataUrl) {
-			clientInformation = { client_id: clientMetadataUrl };
+			clientInformation = {
+				client_id: clientMetadataUrl,
+				issuer
+			};
 			await provider.saveClientInformation?.(clientInformation);
 		} else {
 			if (!provider.saveClientInformation) throw new Error("OAuth client information must be saveable for dynamic registration");
-			const fullInformation = await registerClient(authorizationServerUrl, {
-				metadata,
-				clientMetadata: provider.clientMetadata,
-				scope: resolvedScope,
-				fetchFn
-			});
-			await provider.saveClientInformation(fullInformation);
-			clientInformation = fullInformation;
+			clientInformation = {
+				...await registerClient(authorizationServerUrl, {
+					metadata,
+					clientMetadata: provider.clientMetadata,
+					scope: resolvedScope,
+					fetchFn
+				}),
+				issuer
+			};
+			await provider.saveClientInformation(clientInformation);
 		}
 	}
 	const nonInteractiveFlow = !provider.redirectUrl;
@@ -38331,10 +38509,15 @@ async function authInternal(provider, { serverUrl, authorizationCode, scope, res
 			authorizationCode,
 			fetchFn
 		});
-		await provider.saveTokens(tokens);
+		await bindClientInformation();
+		await provider.saveTokens({
+			...tokens,
+			issuer
+		});
 		return "AUTHORIZED";
 	}
-	const tokens = await provider.tokens();
+	const tokens = discardIfIssuerMismatch(await provider.tokens(), issuer);
+	if (tokens?.refresh_token && tokens.issuer == null) console.warn("[mcp-sdk] stored OAuth tokens have no 'issuer' property (saved by an earlier version, or by a provider that does not keep it) and are used as-is; make sure your OAuthClientProvider stores what saveTokens() and saveClientInformation() receive unchanged.");
 	if (tokens?.refresh_token) try {
 		const newTokens = await refreshAuthorization(authorizationServerUrl, {
 			metadata,
@@ -38344,7 +38527,11 @@ async function authInternal(provider, { serverUrl, authorizationCode, scope, res
 			addClientAuthentication: provider.addClientAuthentication,
 			fetchFn
 		});
-		await provider.saveTokens(newTokens);
+		await bindClientInformation();
+		await provider.saveTokens({
+			...newTokens,
+			issuer
+		});
 		return "AUTHORIZED";
 	} catch (error) {
 		if (!(error instanceof OAuthError) || error instanceof ServerError) {} else throw error;
@@ -38375,6 +38562,17 @@ function isHttpsUrl(value) {
 		return false;
 	}
 }
+/**
+* Selects the RFC 8707 resource indicator for an MCP server: the provider's
+* {@linkcode OAuthClientProvider.validateResourceURL | validateResourceURL} result when
+* implemented, otherwise the protected resource metadata's `resource` (checked against the
+* server URL with `checkResourceAllowed`), or `undefined` when there is no metadata.
+*
+* The result is a parsed `URL`, so a pathless indicator such as `https://example.com` has
+* the `href` `https://example.com/`. {@linkcode auth} therefore sends the metadata string
+* verbatim instead of this URL's `href` (#1968); callers that emit the `resource`
+* parameter themselves should do the same.
+*/
 async function selectResourceURL(serverUrl, provider, resourceMetadata) {
 	const defaultResource = resourceUrlFromServerUrl(serverUrl);
 	if (provider.validateResourceURL) return await provider.validateResourceURL(defaultResource, resourceMetadata?.resource);
@@ -38447,7 +38645,7 @@ async function discoverOAuthProtectedResourceMetadata(serverUrl, opts, fetchFn =
 */
 async function fetchWithCorsRetry(url, headers, fetchFn = fetch) {
 	try {
-		return await fetchFn(url, { headers });
+		return await fetchWithinOrigin(fetchFn)(url, { headers });
 	} catch (error) {
 		if (error instanceof TypeError) {
 			if (headers) return fetchWithCorsRetry(url, void 0, fetchFn);
@@ -38473,7 +38671,7 @@ async function tryMetadataDiscovery(url, protocolVersion, fetchFn = fetch) {
 * Determines if fallback to root discovery should be attempted
 */
 function shouldAttemptFallback(response, pathname) {
-	return !response || response.status >= 400 && response.status < 500 && pathname !== "/";
+	return !response || !response.ok && response.status < 500 && pathname !== "/";
 }
 /**
 * Generic function for discovering OAuth metadata with fallback support
@@ -38561,7 +38759,7 @@ async function discoverAuthorizationServerMetadata(authorizationServerUrl, { fet
 		continue;
 		if (!response.ok) {
 			await response.body?.cancel();
-			if (response.status >= 400 && response.status < 500) continue;
+			if (response.status < 500) continue;
 			throw new Error(`HTTP ${response.status} trying to load ${type === "oauth" ? "OAuth" : "OpenID provider"} metadata from ${endpointUrl}`);
 		}
 		if (type === "oauth") return OAuthMetadataSchema.parse(await response.json());
@@ -38603,6 +38801,9 @@ async function discoverOAuthServerInfo(serverUrl, opts) {
 		resourceMetadata
 	};
 }
+function resourceIndicatorToString(resource) {
+	return typeof resource === "string" ? resource : resource.href;
+}
 /**
 * Begins the authorization flow with the given server, by generating a PKCE challenge and constructing the authorization URL.
 */
@@ -38624,7 +38825,7 @@ async function startAuthorization(authorizationServerUrl, { metadata, clientInfo
 	if (state) authorizationUrl.searchParams.set("state", state);
 	if (scope) authorizationUrl.searchParams.set("scope", scope);
 	if (scope?.includes("offline_access")) authorizationUrl.searchParams.append("prompt", "consent");
-	if (resource) authorizationUrl.searchParams.set("resource", resource.href);
+	if (resource) authorizationUrl.searchParams.set("resource", resourceIndicatorToString(resource));
 	return {
 		authorizationUrl,
 		codeVerifier
@@ -38659,16 +38860,16 @@ async function executeTokenRequest(authorizationServerUrl, { metadata, tokenRequ
 		"Content-Type": "application/x-www-form-urlencoded",
 		Accept: "application/json"
 	});
-	if (resource) tokenRequestParams.set("resource", resource.href);
+	if (resource) tokenRequestParams.set("resource", resourceIndicatorToString(resource));
 	if (addClientAuthentication) await addClientAuthentication(headers, tokenRequestParams, tokenUrl, metadata);
 	else if (clientInformation) applyClientAuthentication(selectClientAuthMethod(clientInformation, metadata?.token_endpoint_auth_methods_supported ?? []), clientInformation, headers, tokenRequestParams);
-	const response = await (fetchFn ?? fetch)(tokenUrl, {
+	const response = await fetchWithinOrigin(fetchFn ?? fetch)(tokenUrl, {
 		method: "POST",
 		headers,
 		body: tokenRequestParams
 	});
 	if (!response.ok) throw await parseErrorResponse(response);
-	return OAuthTokensSchema.parse(await response.json());
+	return TokenResponseSchema.parse(await response.json());
 }
 /**
 * Exchange a refresh token for an updated access token.
@@ -38725,6 +38926,13 @@ async function refreshAuthorization(authorizationServerUrl, { metadata, clientIn
 * const tokens = await fetchToken(provider, authServerUrl, { metadata });
 */
 async function fetchToken(provider, authorizationServerUrl, { metadata, resource, authorizationCode, fetchFn } = {}) {
+	const readClientInformation = async () => {
+		const storedClientInformation = await provider.clientInformation();
+		const checked = discardIfIssuerMismatch(storedClientInformation, String(authorizationServerUrl));
+		if (storedClientInformation && !checked) throw boundElsewhereError(storedClientInformation, String(authorizationServerUrl));
+		return checked;
+	};
+	let clientInformation = await readClientInformation();
 	const scope = provider.clientMetadata.scope;
 	let tokenRequestParams;
 	if (provider.prepareTokenRequest) tokenRequestParams = await provider.prepareTokenRequest(scope);
@@ -38733,11 +38941,11 @@ async function fetchToken(provider, authorizationServerUrl, { metadata, resource
 		if (!provider.redirectUrl) throw new Error("redirectUrl is required for authorization_code flow");
 		tokenRequestParams = prepareAuthorizationCodeRequest(authorizationCode, await provider.codeVerifier(), provider.redirectUrl);
 	}
-	const clientInformation = await provider.clientInformation();
+	clientInformation ?? (clientInformation = await readClientInformation());
 	return executeTokenRequest(authorizationServerUrl, {
 		metadata,
 		tokenRequestParams,
-		clientInformation: clientInformation ?? void 0,
+		clientInformation,
 		addClientAuthentication: provider.addClientAuthentication,
 		resource,
 		fetchFn
@@ -38756,7 +38964,7 @@ async function registerClient(authorizationServerUrl, { metadata, clientMetadata
 		if (!metadata.registration_endpoint) throw new Error("Incompatible auth server: does not support dynamic client registration");
 		registrationUrl = new URL(metadata.registration_endpoint);
 	} else registrationUrl = new URL("/register", authorizationServerUrl);
-	const response = await (fetchFn ?? fetch)(registrationUrl, {
+	const response = await fetchWithinOrigin(fetchFn ?? fetch)(registrationUrl, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
@@ -38765,7 +38973,7 @@ async function registerClient(authorizationServerUrl, { metadata, clientMetadata
 		})
 	});
 	if (!response.ok) throw await parseErrorResponse(response);
-	return OAuthClientInformationFullSchema.parse(await response.json());
+	return RegistrationResponseSchema.parse(await response.json());
 }
 //#endregion
 //#region node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.js
@@ -38791,6 +38999,16 @@ var SSEClientTransport = class {
 		this._authProvider = opts?.authProvider;
 		this._fetch = opts?.fetch;
 		this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
+		this._followRedirects = opts?.redirectPolicy === "follow";
+		if (this._followRedirects) {
+			this._fetch = fetchLeavingRedirects(this._fetch);
+			this._fetchWithInit = fetchLeavingRedirects(this._fetchWithInit);
+		}
+	}
+	/** Error text for a redirect `response` that was not followed, or `undefined` for any other response. */
+	_unfollowedRedirect(response, url) {
+		const text = unfollowedRedirect(response, url);
+		return text && !this._followRedirects ? `${text} (redirectPolicy: 'same-origin')` : text;
 	}
 	async _authThenStart() {
 		if (!this._authProvider) throw new UnauthorizedError("No auth provider");
@@ -38823,7 +39041,9 @@ var SSEClientTransport = class {
 		});
 	}
 	_startOrAuth() {
-		const fetchImpl = this?._eventSourceInit?.fetch ?? this._fetch ?? fetch;
+		const baseFetch = this?._eventSourceInit?.fetch ?? this._fetch ?? fetch;
+		const fetchImpl = this._followRedirects ? baseFetch : fetchWithinOrigin(baseFetch);
+		let redirect;
 		return new Promise((resolve, reject) => {
 			this._eventSource = new EventSource(this._url.href, {
 				...this._eventSourceInit,
@@ -38834,6 +39054,7 @@ var SSEClientTransport = class {
 						...init,
 						headers
 					});
+					redirect = this._unfollowedRedirect(response, url);
 					if (response.status === 401 && response.headers.has("www-authenticate")) {
 						const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
 						this._resourceMetadataUrl = resourceMetadataUrl;
@@ -38848,7 +39069,7 @@ var SSEClientTransport = class {
 					this._authThenStart().then(resolve, reject);
 					return;
 				}
-				const error = new SseError(event.code, event.message, event);
+				const error = new SseError(event.code, redirect ?? event.message, event);
 				reject(error);
 				this.onerror?.(error);
 			};
@@ -38913,7 +39134,7 @@ var SSEClientTransport = class {
 				body: JSON.stringify(message),
 				signal: this._abortController?.signal
 			};
-			const response = await (this._fetch ?? fetch)(this._endpoint, init);
+			const response = await fetchWithinOrigin(this._fetch ?? fetch)(this._endpoint, init);
 			if (!response.ok) {
 				const text = await response.text().catch(() => null);
 				if (response.status === 401 && this._authProvider) {
@@ -38928,7 +39149,7 @@ var SSEClientTransport = class {
 					}) !== "AUTHORIZED") throw new UnauthorizedError();
 					return this.send(message);
 				}
-				throw new Error(`Error POSTing to endpoint (HTTP ${response.status}): ${text}`);
+				throw new Error(`Error POSTing to endpoint (HTTP ${response.status}): ${this._unfollowedRedirect(response, this._endpoint) ?? text}`);
 			}
 			await response.body?.cancel();
 		} catch (error) {
@@ -39719,8 +39940,18 @@ var StreamableHTTPClientTransport = class {
 		this._authProvider = opts?.authProvider;
 		this._fetch = opts?.fetch;
 		this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
+		this._followRedirects = opts?.redirectPolicy === "follow";
+		if (this._followRedirects) {
+			this._fetch = fetchLeavingRedirects(this._fetch);
+			this._fetchWithInit = fetchLeavingRedirects(this._fetchWithInit);
+		}
 		this._sessionId = opts?.sessionId;
 		this._reconnectionOptions = opts?.reconnectionOptions ?? DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS;
+	}
+	/** Error text for a redirect `response` that was not followed, or `undefined` for any other response. */
+	_unfollowedRedirect(response, url) {
+		const text = unfollowedRedirect(response, url);
+		return text && !this._followRedirects ? `${text} (redirectPolicy: 'same-origin')` : text;
 	}
 	async _authThenStart() {
 		if (!this._authProvider) throw new UnauthorizedError("No auth provider");
@@ -39759,16 +39990,23 @@ var StreamableHTTPClientTransport = class {
 			const headers = await this._commonHeaders();
 			headers.set("Accept", "text/event-stream");
 			if (resumptionToken) headers.set("last-event-id", resumptionToken);
-			const response = await (this._fetch ?? fetch)(this._url, {
+			const fetchFn = this._fetch ?? fetch;
+			const init = {
 				method: "GET",
 				headers,
 				signal: this._abortController?.signal
+			};
+			let response = await fetchFn(this._url, this._followRedirects ? init : {
+				...init,
+				redirect: "manual"
 			});
+			const followed = this._followRedirects ? void 0 : followWithinOrigin(fetchFn, this._url, init, response);
+			if (followed) response = await followed;
 			if (!response.ok) {
 				await response.body?.cancel();
 				if (response.status === 401 && this._authProvider) return await this._authThenStart();
 				if (response.status === 405) return;
-				throw new StreamableHTTPError(response.status, `Failed to open SSE stream: ${response.statusText}`);
+				throw new StreamableHTTPError(response.status, `Failed to open SSE stream: ${this._unfollowedRedirect(response, this._url) ?? response.statusText}`);
 			}
 			this._handleSseStream(response.body, options, true);
 		} catch (error) {
@@ -39905,7 +40143,7 @@ var StreamableHTTPClientTransport = class {
 				body: JSON.stringify(message),
 				signal: this._abortController?.signal
 			};
-			const response = await (this._fetch ?? fetch)(this._url, init);
+			const response = await fetchWithinOrigin(this._fetch ?? fetch)(this._url, init);
 			const sessionId = response.headers.get("mcp-session-id");
 			if (sessionId) this._sessionId = sessionId;
 			if (!response.ok) {
@@ -39941,7 +40179,7 @@ var StreamableHTTPClientTransport = class {
 						return this.send(message);
 					}
 				}
-				throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
+				throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${this._unfollowedRedirect(response, this._url) ?? text}`);
 			}
 			this._hasCompletedAuthFlow = false;
 			this._lastUpscopingHeader = void 0;
@@ -39993,9 +40231,9 @@ var StreamableHTTPClientTransport = class {
 				headers,
 				signal: this._abortController?.signal
 			};
-			const response = await (this._fetch ?? fetch)(this._url, init);
+			const response = await fetchWithinOrigin(this._fetch ?? fetch)(this._url, init);
 			await response.body?.cancel();
-			if (!response.ok && response.status !== 405) throw new StreamableHTTPError(response.status, `Failed to terminate session: ${response.statusText}`);
+			if (!response.ok && response.status !== 405) throw new StreamableHTTPError(response.status, `Failed to terminate session: ${this._unfollowedRedirect(response, this._url) ?? response.statusText}`);
 			this._sessionId = void 0;
 		} catch (error) {
 			this.onerror?.(error);
