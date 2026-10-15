@@ -1,6 +1,6 @@
 {
   "name": "mcp-contracts-github-action",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "build": "tsdown",
