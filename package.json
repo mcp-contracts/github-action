@@ -7,14 +7,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@actions/core": "^3.0.0",
-    "@actions/github": "^9.0.0",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
     "@mcp-contracts/core": "^0.8.2",
     "@modelcontextprotocol/sdk": "^1.32.1"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsdown": "^0.23.0",
+    "@types/node": "^26.6.5",
+    "tsdown": "^0.23.1",
     "typescript": "^5.7.0"
   }
 }
