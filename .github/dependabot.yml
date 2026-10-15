@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      # hold back the TypeScript 7 (native) compiler until the toolchain supports it
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      all-actions:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "lukekania/generate-release-notes"
