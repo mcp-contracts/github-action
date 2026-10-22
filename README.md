@@ -22,7 +22,7 @@ jobs:
           node-version: "22"
       - run: npm install
       - name: Check MCP contract
-        uses: mcp-contracts/github-action@main
+        uses: mcp-contracts/github-action@v0.7.0
         with:
           baseline: contracts/baseline.mcpc.json
           command: node
@@ -34,7 +34,7 @@ If your repository has an [`mcpcontracts.json`](https://github.com/mcp-contracts
 
 ```yaml
       - name: Check MCP contract
-        uses: mcp-contracts/github-action@main
+        uses: mcp-contracts/github-action@v0.7.0
 ```
 
 ## Inputs
@@ -98,7 +98,7 @@ Point `config` at an mcp.json and `baseline` at a directory of baseline snapshot
 
 ```yaml
 - name: Check MCP composition
-  uses: mcp-contracts/github-action@main
+  uses: mcp-contracts/github-action@v0.7.0
   with:
     config: mcp.json
     baseline: contracts/composition
@@ -113,7 +113,7 @@ Require a valid detached signature (`.mcpc.sig` next to the baseline, created wi
 
 ```yaml
 - name: Check MCP contract (signed baseline)
-  uses: mcp-contracts/github-action@main
+  uses: mcp-contracts/github-action@v0.7.0
   with:
     baseline: contracts/baseline.mcpc.json
     command: node
@@ -130,7 +130,7 @@ POST the diff report as JSON to any HTTP endpoint on completion. Delivery failur
 
 ```yaml
 - name: Check MCP contract
-  uses: mcp-contracts/github-action@main
+  uses: mcp-contracts/github-action@v0.7.0
   with:
     baseline: contracts/baseline.mcpc.json
     command: node
@@ -142,7 +142,7 @@ POST the diff report as JSON to any HTTP endpoint on completion. Delivery failur
 
 ```yaml
 - name: Check MCP contract (SSE)
-  uses: mcp-contracts/github-action@main
+  uses: mcp-contracts/github-action@v0.7.0
   with:
     baseline: contracts/baseline.mcpc.json
     url: https://mcp.example.com/sse

@@ -1,5 +1,6 @@
 import type {
 	MCPContractSnapshot,
+	PaginationLimits,
 	RawPrompt,
 	RawResource,
 	RawResourceTemplate,
@@ -7,7 +8,7 @@ import type {
 	SnapshotCapture,
 	SnapshotServer,
 } from "@mcp-contracts/core";
-import { createSnapshot } from "@mcp-contracts/core";
+import { collectPages, createSnapshot, DEFAULT_PAGINATION_LIMITS } from "@mcp-contracts/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
@@ -82,84 +83,107 @@ async function connectToServer(
 	return { client, transport };
 }
 
+/** Overall time budget for one capture, across all list calls. */
+const CAPTURE_DEADLINE_MS = 5 * 60 * 1000;
+
 /**
  * Captures tools, resources, and prompts from a connected MCP server.
+ *
+ * Pagination is bounded (pages, items, repeated cursors, overall deadline) so
+ * a hostile or broken server cannot hold the job until the runner timeout.
+ * A failing list call for an advertised capability propagates, so a partial
+ * interface is never treated as the contract.
  *
  * @param client - The connected MCP client.
  * @returns Captured server data.
  */
 async function captureData(client: Client): Promise<CapturedData> {
 	const capabilities = client.getServerCapabilities() ?? {};
+	const limits: PaginationLimits = {
+		...DEFAULT_PAGINATION_LIMITS,
+		deadline: Date.now() + CAPTURE_DEADLINE_MS,
+	};
 
-	const tools: RawTool[] = [];
-	const resources: RawResource[] = [];
-	const resourceTemplates: RawResourceTemplate[] = [];
-	const prompts: RawPrompt[] = [];
+	let tools: RawTool[] = [];
+	let resources: RawResource[] = [];
+	let resourceTemplates: RawResourceTemplate[] = [];
+	let prompts: RawPrompt[] = [];
 
 	if (capabilities.tools) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listTools(cursor ? { cursor } : undefined);
-			for (const tool of result.tools) {
-				tools.push({
-					name: tool.name,
-					description: tool.description,
-					inputSchema: tool.inputSchema as RawTool["inputSchema"],
-					...(tool.outputSchema && {
-						outputSchema: tool.outputSchema as Record<string, unknown>,
-					}),
-					...(tool.annotations && {
-						annotations: tool.annotations as Record<string, unknown>,
-					}),
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
+		tools = await collectPages(
+			"tools",
+			async (cursor) => {
+				const result = await client.listTools(cursor ? { cursor } : undefined);
+				return {
+					items: result.tools.map((tool) => ({
+						name: tool.name,
+						description: tool.description,
+						inputSchema: tool.inputSchema as RawTool["inputSchema"],
+						...(tool.outputSchema && {
+							outputSchema: tool.outputSchema as Record<string, unknown>,
+						}),
+						...(tool.annotations && {
+							annotations: tool.annotations as Record<string, unknown>,
+						}),
+					})),
+					nextCursor: result.nextCursor,
+				};
+			},
+			limits,
+		);
 	}
 
 	if (capabilities.resources) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listResources(cursor ? { cursor } : undefined);
-			for (const resource of result.resources) {
-				resources.push({
-					uri: resource.uri,
-					name: resource.name,
-					description: resource.description,
-					mimeType: resource.mimeType,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
-
-		cursor = undefined;
-		do {
-			const result = await client.listResourceTemplates(cursor ? { cursor } : undefined);
-			for (const template of result.resourceTemplates) {
-				resourceTemplates.push({
-					uriTemplate: template.uriTemplate,
-					name: template.name,
-					description: template.description,
-					mimeType: template.mimeType,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
+		resources = await collectPages(
+			"resources",
+			async (cursor) => {
+				const result = await client.listResources(cursor ? { cursor } : undefined);
+				return {
+					items: result.resources.map((resource) => ({
+						uri: resource.uri,
+						name: resource.name,
+						description: resource.description,
+						mimeType: resource.mimeType,
+					})),
+					nextCursor: result.nextCursor,
+				};
+			},
+			limits,
+		);
+		resourceTemplates = await collectPages(
+			"resource templates",
+			async (cursor) => {
+				const result = await client.listResourceTemplates(cursor ? { cursor } : undefined);
+				return {
+					items: result.resourceTemplates.map((template) => ({
+						uriTemplate: template.uriTemplate,
+						name: template.name,
+						description: template.description,
+						mimeType: template.mimeType,
+					})),
+					nextCursor: result.nextCursor,
+				};
+			},
+			limits,
+		);
 	}
 
 	if (capabilities.prompts) {
-		let cursor: string | undefined;
-		do {
-			const result = await client.listPrompts(cursor ? { cursor } : undefined);
-			for (const prompt of result.prompts) {
-				prompts.push({
-					name: prompt.name,
-					description: prompt.description,
-					arguments: prompt.arguments,
-				});
-			}
-			cursor = result.nextCursor;
-		} while (cursor);
+		prompts = await collectPages(
+			"prompts",
+			async (cursor) => {
+				const result = await client.listPrompts(cursor ? { cursor } : undefined);
+				return {
+					items: result.prompts.map((prompt) => ({
+						name: prompt.name,
+						description: prompt.description,
+						arguments: prompt.arguments,
+					})),
+					nextCursor: result.nextCursor,
+				};
+			},
+			limits,
+		);
 	}
 
 	return { tools, resources, resourceTemplates, prompts };

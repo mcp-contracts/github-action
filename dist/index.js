@@ -25508,7 +25508,7 @@ function number(params) {
 function sortKeys(value) {
 	if (value === null || typeof value !== "object") return value;
 	if (Array.isArray(value)) return value.map(sortKeys);
-	const sorted = {};
+	const sorted = Object.create(null);
 	for (const key of Object.keys(value).sort()) sorted[key] = sortKeys(value[key]);
 	return sorted;
 }
@@ -25615,6 +25615,84 @@ function detectToolCollisions(entries) {
 		}
 	};
 }
+/**
+* Sanitizers for strings that originate from an MCP server.
+*
+* Tool names, descriptions, server info and error messages are attacker
+* controlled. Before any of them reach a terminal, a markdown file or a PR
+* comment they pass through here, so a server cannot forge output, hide
+* findings or drive the viewer's terminal.
+*/
+const OSC_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g;
+const CSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const OTHER_ESCAPE = /\x1b.?/g;
+const CONTROL_CHARS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+const MARKDOWN_SPECIAL = /[\\`[\]<>|!]/g;
+/**
+* Removes terminal escape sequences and control characters.
+*
+* Strips OSC (title, hyperlink, clipboard), CSI (cursor, clear, colour),
+* any other ESC-introduced sequence, and all C0/C1 control characters
+* except newline and tab. Applied regardless of colour settings.
+*
+* @param input - Untrusted text.
+* @returns The text with nothing left that a terminal would interpret.
+*/
+function sanitizeText(input) {
+	return input.replace(OSC_SEQUENCE, "").replace(CSI_SEQUENCE, "").replace(OTHER_ESCAPE, "").replace(CONTROL_CHARS, "");
+}
+/**
+* Makes untrusted text safe to place inline in markdown prose.
+*
+* Control sequences are removed, line breaks collapse to spaces so the text
+* cannot start a new block, and the metacharacters that open HTML, code,
+* links, images or table cells are backslash-escaped. Emphasis markers are
+* deliberately not escaped: they cannot hide content, and escaping them
+* would mangle every snake_case name.
+*
+* @param input - Untrusted text.
+* @returns Escaped text that renders literally.
+*/
+function escapeMarkdown(input) {
+	return sanitizeText(input).replace(/[\n\t]+/g, " ").replace(MARKDOWN_SPECIAL, "\\$&");
+}
+/**
+* Longest run of consecutive backticks in a string.
+*
+* @param input - Any text.
+* @returns Length of the longest backtick run, 0 when there is none.
+*/
+function longestBacktickRun(input) {
+	let longest = 0;
+	for (const match of input.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+	return longest;
+}
+/**
+* Wraps untrusted text in an inline code span that it cannot escape.
+*
+* The delimiter is one backtick longer than any run inside the text, and
+* the content is padded when it starts or ends with a backtick, per
+* CommonMark.
+*
+* @param input - Untrusted text.
+* @returns A markdown code span.
+*/
+function markdownCode(input) {
+	const text = sanitizeText(input).replace(/[\n\t]+/g, " ");
+	if (text === "") return "` `";
+	const delimiter = "`".repeat(longestBacktickRun(text) + 1);
+	const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+	return `${delimiter}${pad}${text}${pad}${delimiter}`;
+}
+/**
+* Chooses a fence that untrusted content cannot close.
+*
+* @param content - The content that will go inside the fence.
+* @returns A string of backticks, at least three, longer than any run in the content.
+*/
+function markdownFence(content) {
+	return "`".repeat(Math.max(3, longestBacktickRun(content) + 1));
+}
 /** ANSI color codes for terminal output. Internal to core formatters. */
 const ANSI = {
 	reset: "\x1B[0m",
@@ -25640,12 +25718,15 @@ ANSI.red, ANSI.yellow, ANSI.green;
 * @returns Markdown string for this change.
 */
 function formatChangeMarkdown(change) {
-	const lines = [`- ${SEVERITY_ICONS[change.severity]} **${change.severity}** — ${change.message}`];
+	const lines = [`- ${SEVERITY_ICONS[change.severity]} **${change.severity}** — ${escapeMarkdown(change.message)}`];
 	if (typeof change.before === "string" && typeof change.after === "string") {
-		lines.push("  ```diff");
-		lines.push(`  - ${change.before}`);
-		lines.push(`  + ${change.after}`);
-		lines.push("  ```");
+		const before = sanitizeText(change.before).replace(/\n/g, "\n    ");
+		const after = sanitizeText(change.after).replace(/\n/g, "\n    ");
+		const fence = markdownFence(`${before}\n${after}`);
+		lines.push(`  ${fence}diff`);
+		lines.push(`  - ${before}`);
+		lines.push(`  + ${after}`);
+		lines.push(`  ${fence}`);
 	}
 	return lines.join("\n");
 }
@@ -25659,7 +25740,8 @@ function formatMarkdown(report) {
 	const lines = [];
 	lines.push("## MCP Contract Diff");
 	lines.push("");
-	lines.push(`**${report.meta.before.serverName}** \`${report.meta.before.serverVersion}\` → \`${report.meta.after.serverVersion}\``);
+	const { before, after } = report.meta;
+	lines.push(`**${escapeMarkdown(before.serverName)}** ${markdownCode(before.serverVersion)} → ${markdownCode(after.serverVersion)}`);
 	lines.push("");
 	if (report.changes.length === 0) {
 		lines.push("No changes detected. :white_check_mark:");
@@ -25723,8 +25805,8 @@ function formatCollisionsMarkdown(report) {
 	lines.push("");
 	for (const collision of report.collisions) {
 		const schemas = collision.kind === "conflicting" ? "schemas differ" : "identical schemas";
-		lines.push(`- ${KIND_ICONS[collision.kind]} **${collision.kind}** — \`${collision.toolName}\` on ${collision.servers.map((s) => `\`${s}\``).join(", ")} (${schemas})`);
-		lines.push(`  - ${collision.suggestion}`);
+		lines.push(`- ${KIND_ICONS[collision.kind]} **${collision.kind}** — ${markdownCode(collision.toolName)} on ${collision.servers.map(markdownCode).join(", ")} (${schemas})`);
+		lines.push(`  - ${escapeMarkdown(collision.suggestion)}`);
 	}
 	return lines.join("\n");
 }
@@ -26137,7 +26219,7 @@ function diffPropertyModifications(toolName, prop, basePath, beforeProp, afterPr
 	changes.push(...diffPropertyEnum(toolName, propPath, prop, beforeProp, afterProp));
 	changes.push(...diffPropertyMetadata(toolName, propPath, prop, beforeProp, afterProp));
 	changes.push(...diffPropertyConstraints(toolName, propPath, prop, beforeProp, afterProp));
-	if (beforeProp.type === "object" && afterProp.type === "object") changes.push(...diffSchemas(toolName, beforeProp, afterProp, schemaKind, propPath));
+	if (beforeProp.properties !== void 0 || afterProp.properties !== void 0) changes.push(...diffSchemas(toolName, beforeProp, afterProp, schemaKind, propPath));
 	return changes;
 }
 /**
@@ -26468,6 +26550,39 @@ function filterBySeverity(changes, minSeverity) {
 	return changes.filter((c) => SEVERITY_ORDER[c.severity] >= minOrder);
 }
 /**
+* Canonical JSON for structural comparison, independent of key order.
+*
+* @param value - Any JSON-compatible value.
+* @returns Stable string form.
+*/
+function canonical(value) {
+	return JSON.stringify(sortKeys(value));
+}
+/**
+* Builds the warning emitted when an entity differs but no rule classified it.
+*
+* The diff engine compares a fixed set of fields and keywords. Anything
+* outside that set would otherwise change the content hash while the report
+* said "no changes", which is the one outcome a contract tool must never
+* produce. The warning makes the drift visible and lets `--fail-on warning`
+* gate on it.
+*
+* @param category - The entity category.
+* @param name - The entity name or URI.
+* @returns A warning-level modified change.
+*/
+function unclassifiedChange(category, name) {
+	const label = category.charAt(0).toUpperCase() + category.slice(1);
+	return {
+		id: `${category}.${name}.unclassified`,
+		category,
+		name,
+		severity: "warning",
+		type: "modified",
+		message: `${label} "${name}" changed in a way the diff engine does not classify`
+	};
+}
+/**
 * Detects tool-level changes between two snapshots.
 *
 * @param before - The baseline snapshot.
@@ -26499,6 +26614,7 @@ function diffTools(before, after) {
 		const beforeTool = before.tools[name];
 		const afterTool = after.tools[name];
 		if (!beforeTool || !afterTool) continue;
+		const countBefore = changes.length;
 		if (beforeTool.description !== afterTool.description) changes.push({
 			id: `tool.${name}.description`,
 			category: "tool",
@@ -26512,6 +26628,18 @@ function diffTools(before, after) {
 		});
 		changes.push(...diffSchemas(name, beforeTool.inputSchema, afterTool.inputSchema, "inputSchema"));
 		changes.push(...diffOutputSchema(name, beforeTool.outputSchema, afterTool.outputSchema));
+		if (canonical(beforeTool.annotations) !== canonical(afterTool.annotations)) changes.push({
+			id: `tool.${name}.annotations`,
+			category: "tool",
+			name,
+			severity: "warning",
+			type: "modified",
+			message: `Tool "${name}" annotations changed`,
+			path: "annotations",
+			before: beforeTool.annotations,
+			after: afterTool.annotations
+		});
+		if (changes.length === countBefore && canonical(beforeTool) !== canonical(afterTool)) changes.push(unclassifiedChange("tool", name));
 	}
 	return changes;
 }
@@ -26547,29 +26675,43 @@ function diffResources(before, after) {
 		const beforeRes = before.resources[uri];
 		const afterRes = after.resources[uri];
 		if (!beforeRes || !afterRes) continue;
-		if (beforeRes.description !== afterRes.description) changes.push({
-			id: `resource.${uri}.description`,
-			category: "resource",
-			name: uri,
-			severity: "warning",
-			type: "modified",
-			message: `Resource "${uri}" description changed`,
-			path: "description",
-			before: beforeRes.description,
-			after: afterRes.description
-		});
-		if (beforeRes.mimeType !== afterRes.mimeType) changes.push({
-			id: `resource.${uri}.mimeType`,
-			category: "resource",
-			name: uri,
-			severity: "warning",
-			type: "modified",
-			message: `Resource "${uri}" MIME type changed from "${beforeRes.mimeType ?? "unset"}" to "${afterRes.mimeType ?? "unset"}"`,
-			path: "mimeType",
-			before: beforeRes.mimeType,
-			after: afterRes.mimeType
-		});
+		changes.push(...diffResourceModifications(uri, beforeRes, afterRes));
 	}
+	return changes;
+}
+/**
+* Detects modifications to a single resource present in both snapshots.
+*
+* @param uri - The resource URI.
+* @param beforeRes - The old resource contract.
+* @param afterRes - The new resource contract.
+* @returns List of changes for this resource.
+*/
+function diffResourceModifications(uri, beforeRes, afterRes) {
+	const changes = [];
+	if (beforeRes.description !== afterRes.description) changes.push({
+		id: `resource.${uri}.description`,
+		category: "resource",
+		name: uri,
+		severity: "warning",
+		type: "modified",
+		message: `Resource "${uri}" description changed`,
+		path: "description",
+		before: beforeRes.description,
+		after: afterRes.description
+	});
+	if (beforeRes.mimeType !== afterRes.mimeType) changes.push({
+		id: `resource.${uri}.mimeType`,
+		category: "resource",
+		name: uri,
+		severity: "warning",
+		type: "modified",
+		message: `Resource "${uri}" MIME type changed from "${beforeRes.mimeType ?? "unset"}" to "${afterRes.mimeType ?? "unset"}"`,
+		path: "mimeType",
+		before: beforeRes.mimeType,
+		after: afterRes.mimeType
+	});
+	if (changes.length === 0 && canonical(beforeRes) !== canonical(afterRes)) changes.push(unclassifiedChange("resource", uri));
 	return changes;
 }
 /**
@@ -26656,7 +26798,9 @@ function diffPrompts(before, after) {
 		const beforePrompt = before.prompts[name];
 		const afterPrompt = after.prompts[name];
 		if (!beforePrompt || !afterPrompt) continue;
-		changes.push(...diffPromptModifications(name, beforePrompt, afterPrompt));
+		const modifications = diffPromptModifications(name, beforePrompt, afterPrompt);
+		changes.push(...modifications);
+		if (modifications.length === 0 && canonical(beforePrompt) !== canonical(afterPrompt)) changes.push(unclassifiedChange("prompt", name));
 	}
 	return changes;
 }
@@ -26811,7 +26955,7 @@ function formatCompositionMarkdown(report) {
 	lines.push("");
 	for (const entry of report.servers) {
 		const marker = entry.status === "diffed" && entry.report?.summary.total === 0 ? ":white_check_mark:" : (entry.report?.summary.breaking ?? 0) > 0 ? ":x:" : ":warning:";
-		lines.push(`### ${entry.serverName} ${marker}`);
+		lines.push(`### ${escapeMarkdown(entry.serverName)} ${marker}`);
 		lines.push("");
 		lines.push(serverStatusLine(entry));
 		lines.push("");
@@ -26824,6 +26968,45 @@ function formatCompositionMarkdown(report) {
 		lines.push("");
 	}
 	return lines.join("\n").trimEnd();
+}
+/** Default bounds for discovery. Generous for real servers, fatal for endless ones. */
+const DEFAULT_PAGINATION_LIMITS = {
+	maxPages: 1e3,
+	maxItems: 1e4
+};
+/**
+* Follows `nextCursor` until the server stops returning one, within bounds.
+*
+* Discovery must terminate regardless of what the server sends, so the
+* collector refuses to continue past the page or item limit, when a cursor
+* repeats, or once the deadline has passed. Each of those is a discovery
+* failure (thrown), never a silently truncated result.
+*
+* @param label - What is being listed, for error messages (e.g. "tools").
+* @param fetchPage - Requests one page; receives the cursor from the previous page.
+* @param limits - Bounds to enforce. Defaults to {@link DEFAULT_PAGINATION_LIMITS}.
+* @returns Every item from every page, in order.
+* @throws Error when a bound is exceeded or a cursor repeats.
+*/
+async function collectPages(label, fetchPage, limits = DEFAULT_PAGINATION_LIMITS) {
+	const items = [];
+	const seenCursors = /* @__PURE__ */ new Set();
+	let cursor;
+	let pages = 0;
+	do {
+		if (limits.deadline !== void 0 && Date.now() > limits.deadline) throw new Error(`Listing ${label} exceeded the capture deadline`);
+		if (pages >= limits.maxPages) throw new Error(`Listing ${label} exceeded ${limits.maxPages} pages`);
+		const page = await fetchPage(cursor);
+		pages += 1;
+		if (items.length + page.items.length > limits.maxItems) throw new Error(`Listing ${label} exceeded ${limits.maxItems} items`);
+		items.push(...page.items);
+		cursor = page.nextCursor;
+		if (cursor !== void 0) {
+			if (seenCursors.has(cursor)) throw new Error(`Listing ${label} returned a repeated cursor; refusing to loop`);
+			seenCursors.add(cursor);
+		}
+	} while (cursor !== void 0);
+	return items;
 }
 /**
 * mcpcontracts.json project config: types, schema, and validation.
@@ -26973,6 +27156,7 @@ function verifySignature(snapshot, signature, publicKeyPem) {
 		contentHashMatch: true,
 		signatureMatch: false
 	};
+	if (publicKeyPem.includes("PRIVATE KEY")) throw new Error("Signature verification requires a public key, but a private key was supplied");
 	const data = Buffer.from(signature.contentHash, "utf-8");
 	const signatureBytes = Buffer.from(signature.signature, "base64");
 	const publicKey = (0, node_crypto.createPublicKey)(publicKeyPem);
@@ -27046,7 +27230,7 @@ const SNAPSHOT_VERSION = "1.0.0";
 * @returns Record keyed by tool name.
 */
 function normalizeTools(tools) {
-	const result = {};
+	const result = Object.create(null);
 	for (const tool of tools) {
 		const contract = {
 			description: tool.description ?? "",
@@ -27054,6 +27238,7 @@ function normalizeTools(tools) {
 		};
 		if (tool.outputSchema !== void 0) contract.outputSchema = tool.outputSchema;
 		if (tool.annotations !== void 0) contract.annotations = tool.annotations;
+		if (tool.name in result) throw new Error(`Duplicate tool name "${tool.name}" in server listing`);
 		result[tool.name] = contract;
 	}
 	return result;
@@ -27068,17 +27253,23 @@ function normalizeTools(tools) {
 * @returns Record keyed by resource URI or template URI.
 */
 function normalizeResources(resources, resourceTemplates) {
-	const result = {};
-	for (const resource of resources) result[resource.uri] = {
-		description: resource.description ?? "",
-		isTemplate: false,
-		...resource.mimeType !== void 0 && { mimeType: resource.mimeType }
-	};
-	for (const template of resourceTemplates) result[template.uriTemplate] = {
-		description: template.description ?? "",
-		isTemplate: true,
-		...template.mimeType !== void 0 && { mimeType: template.mimeType }
-	};
+	const result = Object.create(null);
+	for (const resource of resources) {
+		if (resource.uri in result) throw new Error(`Duplicate resource URI "${resource.uri}" in server listing`);
+		result[resource.uri] = {
+			description: resource.description ?? "",
+			isTemplate: false,
+			...resource.mimeType !== void 0 && { mimeType: resource.mimeType }
+		};
+	}
+	for (const template of resourceTemplates) {
+		if (template.uriTemplate in result) throw new Error(`Duplicate resource URI "${template.uriTemplate}" in server listing`);
+		result[template.uriTemplate] = {
+			description: template.description ?? "",
+			isTemplate: true,
+			...template.mimeType !== void 0 && { mimeType: template.mimeType }
+		};
+	}
 	return result;
 }
 /**
@@ -27088,7 +27279,7 @@ function normalizeResources(resources, resourceTemplates) {
 * @returns Record keyed by prompt name.
 */
 function normalizePrompts(prompts) {
-	const result = {};
+	const result = Object.create(null);
 	for (const prompt of prompts) {
 		const args = (prompt.arguments ?? []).map((arg) => {
 			const normalized = { name: arg.name };
@@ -27096,6 +27287,7 @@ function normalizePrompts(prompts) {
 			if (arg.required !== void 0) normalized.required = arg.required;
 			return normalized;
 		});
+		if (prompt.name in result) throw new Error(`Duplicate prompt name "${prompt.name}" in server listing`);
 		result[prompt.name] = {
 			description: prompt.description ?? "",
 			arguments: args
@@ -40275,7 +40467,7 @@ var StreamableHTTPClientTransport = class {
 //#endregion
 //#region src/version.ts
 /** Version of this action, kept in sync with package.json. */
-const ACTION_VERSION = "0.5.0";
+const ACTION_VERSION = "0.7.0";
 /** Tool identifier written into captured snapshots. */
 const ACTION_TOOL = `mcp-contracts-action/${ACTION_VERSION}`;
 //#endregion
@@ -40318,68 +40510,79 @@ async function connectToServer(config) {
 		transport
 	};
 }
+/** Overall time budget for one capture, across all list calls. */
+const CAPTURE_DEADLINE_MS = 3e5;
 /**
 * Captures tools, resources, and prompts from a connected MCP server.
+*
+* Pagination is bounded (pages, items, repeated cursors, overall deadline) so
+* a hostile or broken server cannot hold the job until the runner timeout.
+* A failing list call for an advertised capability propagates, so a partial
+* interface is never treated as the contract.
 *
 * @param client - The connected MCP client.
 * @returns Captured server data.
 */
 async function captureData(client) {
 	const capabilities = client.getServerCapabilities() ?? {};
-	const tools = [];
-	const resources = [];
-	const resourceTemplates = [];
-	const prompts = [];
-	if (capabilities.tools) {
-		let cursor;
-		do {
-			const result = await client.listTools(cursor ? { cursor } : void 0);
-			for (const tool of result.tools) tools.push({
+	const limits = {
+		...DEFAULT_PAGINATION_LIMITS,
+		deadline: Date.now() + CAPTURE_DEADLINE_MS
+	};
+	let tools = [];
+	let resources = [];
+	let resourceTemplates = [];
+	let prompts = [];
+	if (capabilities.tools) tools = await collectPages("tools", async (cursor) => {
+		const result = await client.listTools(cursor ? { cursor } : void 0);
+		return {
+			items: result.tools.map((tool) => ({
 				name: tool.name,
 				description: tool.description,
 				inputSchema: tool.inputSchema,
 				...tool.outputSchema && { outputSchema: tool.outputSchema },
 				...tool.annotations && { annotations: tool.annotations }
-			});
-			cursor = result.nextCursor;
-		} while (cursor);
-	}
+			})),
+			nextCursor: result.nextCursor
+		};
+	}, limits);
 	if (capabilities.resources) {
-		let cursor;
-		do {
+		resources = await collectPages("resources", async (cursor) => {
 			const result = await client.listResources(cursor ? { cursor } : void 0);
-			for (const resource of result.resources) resources.push({
-				uri: resource.uri,
-				name: resource.name,
-				description: resource.description,
-				mimeType: resource.mimeType
-			});
-			cursor = result.nextCursor;
-		} while (cursor);
-		cursor = void 0;
-		do {
+			return {
+				items: result.resources.map((resource) => ({
+					uri: resource.uri,
+					name: resource.name,
+					description: resource.description,
+					mimeType: resource.mimeType
+				})),
+				nextCursor: result.nextCursor
+			};
+		}, limits);
+		resourceTemplates = await collectPages("resource templates", async (cursor) => {
 			const result = await client.listResourceTemplates(cursor ? { cursor } : void 0);
-			for (const template of result.resourceTemplates) resourceTemplates.push({
-				uriTemplate: template.uriTemplate,
-				name: template.name,
-				description: template.description,
-				mimeType: template.mimeType
-			});
-			cursor = result.nextCursor;
-		} while (cursor);
+			return {
+				items: result.resourceTemplates.map((template) => ({
+					uriTemplate: template.uriTemplate,
+					name: template.name,
+					description: template.description,
+					mimeType: template.mimeType
+				})),
+				nextCursor: result.nextCursor
+			};
+		}, limits);
 	}
-	if (capabilities.prompts) {
-		let cursor;
-		do {
-			const result = await client.listPrompts(cursor ? { cursor } : void 0);
-			for (const prompt of result.prompts) prompts.push({
+	if (capabilities.prompts) prompts = await collectPages("prompts", async (cursor) => {
+		const result = await client.listPrompts(cursor ? { cursor } : void 0);
+		return {
+			items: result.prompts.map((prompt) => ({
 				name: prompt.name,
 				description: prompt.description,
 				arguments: prompt.arguments
-			});
-			cursor = result.nextCursor;
-		} while (cursor);
-	}
+			})),
+			nextCursor: result.nextCursor
+		};
+	}, limits);
 	return {
 		tools,
 		resources,
