@@ -10,11 +10,11 @@
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
     "@mcp-contracts/core": "^0.9.0",
-    "@modelcontextprotocol/sdk": "^1.32.1"
+    "@modelcontextprotocol/sdk": "^1.32.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "tsdown": "^0.23.1",
+    "tsdown": "^0.23.2",
     "typescript": "^5.7.0"
   }
 }
