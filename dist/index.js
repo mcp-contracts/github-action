@@ -40215,7 +40215,7 @@ var StreamableHTTPClientTransport = class {
 };
 // src/version.ts
 /** Version of this action, kept in sync with package.json. */
-const ACTION_VERSION = "0.7.0";
+const ACTION_VERSION = "0.8.0";
 /** Tool identifier written into captured snapshots. */
 const ACTION_TOOL = `mcp-contracts-action/${ACTION_VERSION}`;
 // src/mcp-client.ts
@@ -40749,7 +40749,11 @@ async function publishReport(markdown) {
 		const token = getInput("github-token", { required: false }) || process.env["GITHUB_TOKEN"];
 		if (token) {
 			const prNumber = context.payload.pull_request?.number;
-			if (prNumber) await postOrUpdatePRComment(markdown, token, prNumber);
+			if (prNumber) try {
+				await postOrUpdatePRComment(markdown, token, prNumber);
+			} catch (error) {
+				warning(`Could not post the PR comment (${error instanceof Error ? error.message : String(error)}). The report is in the step summary. On pull requests from forks the token is read-only; set comment-on-pr to false to silence this.`);
+			}
 		} else warning("No GitHub token available — skipping PR comment");
 	}
 }
@@ -40767,7 +40771,6 @@ async function runCompositionMode(inputs) {
 	const { report, collisions, captureFailures } = await runComposition(inputs.config, inputs.baseline, inputs.checkConflicts);
 	let markdown = formatCompositionMarkdown(report);
 	if (collisions) markdown += `\n${formatCollisionsMarkdown(collisions)}`;
-	await publishReport(markdown);
 	const hasConflicts = (collisions?.summary.conflicting ?? 0) > 0;
 	const shouldFail = compositionHasFailure(report, failOn);
 	setOutput("has-changes", String(report.summary.total > 0));
@@ -40775,6 +40778,7 @@ async function runCompositionMode(inputs) {
 	setOutput("has-conflicts", String(hasConflicts));
 	setOutput("summary", JSON.stringify(report.summary));
 	setOutput("exit-code", shouldFail || hasConflicts || captureFailures.length > 0 ? "1" : "0");
+	await publishReport(markdown);
 	if (captureFailures.length > 0) {
 		const failed = captureFailures.map((f) => `${f.serverName} (${f.error})`).join(", ");
 		setFailed(`Failed to capture ${captureFailures.length} server(s): ${failed}`);
@@ -40823,6 +40827,13 @@ async function runSingleServerMode(inputs) {
 		info("Baseline signature verified");
 	}
 	const report = diffSnapshots(baseline, await captureSnapshot(transport));
+	const threshold = SEVERITY_ORDER[failOn];
+	const shouldFail = report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
+	setOutput("has-changes", String(report.changes.length > 0));
+	setOutput("has-breaking", String(report.summary.breaking > 0));
+	setOutput("has-conflicts", "false");
+	setOutput("summary", JSON.stringify(report.summary));
+	setOutput("exit-code", shouldFail ? "1" : "0");
 	await publishReport(formatMarkdown(report));
 	if (inputs.webhook) {
 		const serverSource = transport.transport === "stdio" ? [transport.command, ...transport.args ?? []].join(" ") : transport.url;
@@ -40835,13 +40846,6 @@ async function runSingleServerMode(inputs) {
 		if (result.success) info(`Webhook delivered (HTTP ${result.statusCode})`);
 		else warning(`Webhook delivery failed: ${result.error}`);
 	}
-	const threshold = SEVERITY_ORDER[failOn];
-	const shouldFail = report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
-	setOutput("has-changes", String(report.changes.length > 0));
-	setOutput("has-breaking", String(report.summary.breaking > 0));
-	setOutput("has-conflicts", "false");
-	setOutput("summary", JSON.stringify(report.summary));
-	setOutput("exit-code", shouldFail ? "1" : "0");
 	if (shouldFail) setFailed(`MCP contract changes at or above "${failOn}" severity detected`);
 }
 /**
