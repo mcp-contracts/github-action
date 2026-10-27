@@ -107,7 +107,14 @@ async function publishReport(markdown: string): Promise<void> {
 		if (token) {
 			const prNumber = github.context.payload.pull_request?.number;
 			if (prNumber) {
-				await postOrUpdatePRComment(markdown, token, prNumber);
+				try {
+					await postOrUpdatePRComment(markdown, token, prNumber);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					core.warning(
+						`Could not post the PR comment (${message}). The report is in the step summary. On pull requests from forks the token is read-only; set comment-on-pr to false to silence this.`,
+					);
+				}
 			}
 		} else {
 			core.warning("No GitHub token available — skipping PR comment");
@@ -143,8 +150,6 @@ async function runCompositionMode(inputs: ActionInputs): Promise<void> {
 	if (collisions) {
 		markdown += `\n${formatCollisionsMarkdown(collisions)}`;
 	}
-	await publishReport(markdown);
-
 	const hasConflicts = (collisions?.summary.conflicting ?? 0) > 0;
 	const shouldFail = compositionHasFailure(report, failOn);
 
@@ -153,6 +158,8 @@ async function runCompositionMode(inputs: ActionInputs): Promise<void> {
 	core.setOutput("has-conflicts", String(hasConflicts));
 	core.setOutput("summary", JSON.stringify(report.summary));
 	core.setOutput("exit-code", shouldFail || hasConflicts || captureFailures.length > 0 ? "1" : "0");
+
+	await publishReport(markdown);
 
 	if (captureFailures.length > 0) {
 		const failed = captureFailures.map((f) => `${f.serverName} (${f.error})`).join(", ");
@@ -227,6 +234,15 @@ async function runSingleServerMode(inputs: ActionInputs): Promise<void> {
 	const current = await captureSnapshot(transport);
 	const report = diffSnapshots(baseline, current);
 
+	const threshold = SEVERITY_ORDER[failOn];
+	const shouldFail = report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
+
+	core.setOutput("has-changes", String(report.changes.length > 0));
+	core.setOutput("has-breaking", String(report.summary.breaking > 0));
+	core.setOutput("has-conflicts", "false");
+	core.setOutput("summary", JSON.stringify(report.summary));
+	core.setOutput("exit-code", shouldFail ? "1" : "0");
+
 	await publishReport(formatMarkdown(report));
 
 	if (inputs.webhook) {
@@ -246,15 +262,6 @@ async function runSingleServerMode(inputs: ActionInputs): Promise<void> {
 			core.warning(`Webhook delivery failed: ${result.error}`);
 		}
 	}
-
-	const threshold = SEVERITY_ORDER[failOn];
-	const shouldFail = report.changes.some((c) => SEVERITY_ORDER[c.severity] >= threshold);
-
-	core.setOutput("has-changes", String(report.changes.length > 0));
-	core.setOutput("has-breaking", String(report.summary.breaking > 0));
-	core.setOutput("has-conflicts", "false");
-	core.setOutput("summary", JSON.stringify(report.summary));
-	core.setOutput("exit-code", shouldFail ? "1" : "0");
 
 	if (shouldFail) {
 		core.setFailed(`MCP contract changes at or above "${failOn}" severity detected`);

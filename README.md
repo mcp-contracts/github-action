@@ -22,7 +22,7 @@ jobs:
           node-version: "22"
       - run: npm install
       - name: Check MCP contract
-        uses: mcp-contracts/github-action@v0.7.0
+        uses: mcp-contracts/github-action@v0.8.0
         with:
           baseline: contracts/baseline.mcpc.json
           command: node
@@ -34,7 +34,7 @@ With an [`mcpcontracts.json`](https://github.com/mcp-contracts/mcp-contracts#pro
 
 ```yaml
       - name: Check MCP contract
-        uses: mcp-contracts/github-action@v0.7.0
+        uses: mcp-contracts/github-action@v0.8.0
 ```
 
 Run the action on `pull_request`, never `pull_request_target`: the config names a command that the action executes, and on `pull_request` a fork's config runs with a read-only token and no secrets. See the [trust model](https://github.com/mcp-contracts/mcp-contracts/blob/main/SECURITY.md#trust-model).
@@ -98,7 +98,7 @@ Point `config` at an mcp.json and `baseline` at a directory of baseline snapshot
 
 ```yaml
 - name: Check MCP composition
-  uses: mcp-contracts/github-action@v0.7.0
+  uses: mcp-contracts/github-action@v0.8.0
   with:
     config: mcp.json
     baseline: contracts/composition
@@ -113,7 +113,7 @@ Require a valid detached signature (`.mcpc.sig` next to the baseline, created wi
 
 ```yaml
 - name: Check MCP contract (signed baseline)
-  uses: mcp-contracts/github-action@v0.7.0
+  uses: mcp-contracts/github-action@v0.8.0
   with:
     baseline: contracts/baseline.mcpc.json
     command: node
@@ -130,7 +130,7 @@ Remote servers are reached with `url`, optionally over SSE with custom headers. 
 
 ```yaml
 - name: Check MCP contract (remote server)
-  uses: mcp-contracts/github-action@v0.7.0
+  uses: mcp-contracts/github-action@v0.8.0
   with:
     baseline: contracts/baseline.mcpc.json
     url: https://mcp.example.com/sse
