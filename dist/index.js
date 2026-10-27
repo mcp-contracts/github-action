@@ -25767,6 +25767,36 @@ function resolveCommandString(commandString, extraArgs) {
 	} : { command };
 }
 /**
+* Reads a schema's `properties` as a record, tolerating malformed input.
+*
+* @param schema - The schema.
+* @returns The properties record, empty when absent or not an object.
+*/
+function propertiesOf(schema) {
+	const props = schema.properties;
+	return props !== null && typeof props === "object" && !Array.isArray(props) ? props : {};
+}
+/**
+* Reads a schema's `required` list, tolerating malformed input.
+*
+* @param schema - The schema.
+* @returns The required property names, empty when absent or not an array.
+*/
+function requiredOf(schema) {
+	const req = schema.required;
+	return new Set(Array.isArray(req) ? req.filter((r) => typeof r === "string") : []);
+}
+/**
+* Reads a schema's `enum` list, tolerating malformed input.
+*
+* @param schema - The schema.
+* @returns The enum values, or undefined when absent or not an array.
+*/
+function enumOf(schema) {
+	const e = schema.enum;
+	return Array.isArray(e) ? e : void 0;
+}
+/**
 * Normalizes a JSON Schema `type` field to an array of strings for comparison.
 *
 * @param type - The type value from a JSON Schema (string, array, or undefined).
@@ -25913,8 +25943,31 @@ function diffPropertyType(toolName, propPath, prop, beforeProp, afterProp) {
 * @returns Array of enum-related schema changes.
 */
 function diffPropertyEnum(toolName, propPath, prop, beforeProp, afterProp) {
-	const beforeEnum = beforeProp.enum;
-	const afterEnum = afterProp.enum;
+	const beforeEnum = enumOf(beforeProp);
+	const afterEnum = enumOf(afterProp);
+	if (!beforeEnum && !afterEnum) return [];
+	if (!beforeEnum && afterEnum) return [{
+		id: `tool.${toolName}.${propPath}.enumAdded`,
+		category: "tool",
+		name: toolName,
+		severity: "breaking",
+		type: "modified",
+		message: `Parameter "${prop}" is now restricted to an enum in ${toolName}`,
+		path: propPath,
+		before: void 0,
+		after: afterEnum
+	}];
+	if (beforeEnum && !afterEnum) return [{
+		id: `tool.${toolName}.${propPath}.enumRemoved`,
+		category: "tool",
+		name: toolName,
+		severity: "safe",
+		type: "modified",
+		message: `Parameter "${prop}" is no longer restricted to an enum in ${toolName}`,
+		path: propPath,
+		before: beforeEnum,
+		after: void 0
+	}];
 	if (!beforeEnum || !afterEnum) return [];
 	const changes = [];
 	const beforeSet = new Set(beforeEnum.map((v) => JSON.stringify(v)));
@@ -25979,17 +26032,20 @@ function diffPropertyMetadata(toolName, propPath, prop, beforeProp, afterProp) {
 		before: beforeProp.default,
 		after: afterProp.default
 	});
-	if (beforeProp.format !== afterProp.format && afterProp.format !== void 0) changes.push({
-		id: `tool.${toolName}.${propPath}.formatChanged`,
-		category: "tool",
-		name: toolName,
-		severity: "warning",
-		type: "modified",
-		message: beforeProp.format ? `Parameter "${prop}" format changed from "${beforeProp.format}" to "${afterProp.format}"` : `Parameter "${prop}" format "${afterProp.format}" was added`,
-		path: `${propPath}.format`,
-		before: beforeProp.format,
-		after: afterProp.format
-	});
+	if (beforeProp.format !== afterProp.format) {
+		const removed = afterProp.format === void 0;
+		changes.push({
+			id: `tool.${toolName}.${propPath}.${removed ? "formatRemoved" : "formatChanged"}`,
+			category: "tool",
+			name: toolName,
+			severity: removed ? "safe" : "breaking",
+			type: "modified",
+			message: removed ? `Parameter "${prop}" format "${beforeProp.format}" was removed` : beforeProp.format ? `Parameter "${prop}" format changed from "${beforeProp.format}" to "${afterProp.format}"` : `Parameter "${prop}" format "${afterProp.format}" was added`,
+			path: `${propPath}.format`,
+			before: beforeProp.format,
+			after: afterProp.format
+		});
+	}
 	return changes;
 }
 /**
@@ -26030,6 +26086,84 @@ function diffPropertyConstraints(toolName, propPath, prop, beforeProp, afterProp
 		});
 	}
 	return changes;
+}
+/**
+* Detects value-restricting keyword changes (`pattern`, `const`) for a single property.
+*
+* Adding or changing one rejects inputs that were valid before, so it is
+* breaking; removing one is safe.
+*
+* @param toolName - The tool name.
+* @param propPath - The full property path.
+* @param prop - The property name.
+* @param beforeProp - The old property schema.
+* @param afterProp - The new property schema.
+* @returns Array of restriction-related schema changes.
+*/
+function diffPropertyRestrictions(toolName, propPath, prop, beforeProp, afterProp) {
+	const changes = [];
+	for (const key of ["pattern", "const"]) {
+		const before = beforeProp[key];
+		const after = afterProp[key];
+		if (JSON.stringify(before) === JSON.stringify(after)) continue;
+		const removed = after === void 0;
+		const suffix = removed ? "Removed" : before === void 0 ? "Added" : "Changed";
+		changes.push({
+			id: `tool.${toolName}.${propPath}.${key}${suffix}`,
+			category: "tool",
+			name: toolName,
+			severity: removed ? "safe" : "breaking",
+			type: "modified",
+			message: `Parameter "${prop}" ${key} was ${suffix.toLowerCase()} in ${toolName}`,
+			path: `${propPath}.${key}`,
+			before,
+			after
+		});
+	}
+	return changes;
+}
+/**
+* Detects array `items` changes for a single property.
+*
+* Constraining items where none were constrained, or changing or narrowing
+* their type, rejects element values that were valid before (breaking);
+* removing or widening is safe.
+*
+* @param toolName - The tool name.
+* @param propPath - The full property path.
+* @param prop - The property name.
+* @param beforeProp - The old property schema.
+* @param afterProp - The new property schema.
+* @returns Array of items-related schema changes.
+*/
+function diffPropertyItems(toolName, propPath, prop, beforeProp, afterProp) {
+	const beforeItems = beforeProp["items"];
+	const afterItems = afterProp["items"];
+	const itemsPath = `${propPath}.items`;
+	if (beforeItems === void 0 && afterItems !== void 0) return [{
+		id: `tool.${toolName}.${propPath}.itemsAdded`,
+		category: "tool",
+		name: toolName,
+		severity: "breaking",
+		type: "modified",
+		message: `Parameter "${prop}" array items are now constrained in ${toolName}`,
+		path: itemsPath,
+		before: void 0,
+		after: afterItems
+	}];
+	if (beforeItems !== void 0 && afterItems === void 0) return [{
+		id: `tool.${toolName}.${propPath}.itemsRemoved`,
+		category: "tool",
+		name: toolName,
+		severity: "safe",
+		type: "modified",
+		message: `Parameter "${prop}" array items are no longer constrained in ${toolName}`,
+		path: itemsPath,
+		before: beforeItems,
+		after: void 0
+	}];
+	if (beforeItems === void 0 || afterItems === void 0) return [];
+	return [...diffPropertyType(toolName, itemsPath, `${prop}[]`, beforeItems, afterItems), ...diffPropertyEnum(toolName, itemsPath, `${prop}[]`, beforeItems, afterItems)];
 }
 /**
 * Detects all modifications to a single property that exists in both schemas.
@@ -26075,6 +26209,8 @@ function diffPropertyModifications(toolName, prop, basePath, beforeProp, afterPr
 	changes.push(...diffPropertyEnum(toolName, propPath, prop, beforeProp, afterProp));
 	changes.push(...diffPropertyMetadata(toolName, propPath, prop, beforeProp, afterProp));
 	changes.push(...diffPropertyConstraints(toolName, propPath, prop, beforeProp, afterProp));
+	changes.push(...diffPropertyRestrictions(toolName, propPath, prop, beforeProp, afterProp));
+	changes.push(...diffPropertyItems(toolName, propPath, prop, beforeProp, afterProp));
 	if (beforeProp.properties !== void 0 || afterProp.properties !== void 0) changes.push(...diffSchemas(toolName, beforeProp, afterProp, schemaKind, propPath));
 	return changes;
 }
@@ -26182,10 +26318,10 @@ function diffRemovedProperties(toolName, basePath, beforeProps, afterPropNames, 
 * @returns Array of detected schema changes.
 */
 function diffSchemas(toolName, beforeSchema, afterSchema, schemaKind, basePath = schemaKind) {
-	const beforeProps = beforeSchema.properties ?? {};
-	const afterProps = afterSchema.properties ?? {};
-	const beforeRequired = new Set(beforeSchema.required ?? []);
-	const afterRequired = new Set(afterSchema.required ?? []);
+	const beforeProps = propertiesOf(beforeSchema);
+	const afterProps = propertiesOf(afterSchema);
+	const beforeRequired = requiredOf(beforeSchema);
+	const afterRequired = requiredOf(afterSchema);
 	const beforePropNames = new Set(Object.keys(beforeProps));
 	const afterPropNames = new Set(Object.keys(afterProps));
 	const changes = [...diffAddedProperties(toolName, basePath, afterProps, beforePropNames, afterRequired), ...diffRemovedProperties(toolName, basePath, beforeProps, afterPropNames, beforeRequired)];
@@ -26323,11 +26459,11 @@ function diffModifiedOutputFields(toolName, beforeProps, afterProps) {
 * @returns Array of field-level output schema changes.
 */
 function diffOutputSchemaFields(toolName, beforeOutput, afterOutput) {
-	const beforeProps = beforeOutput.properties ?? {};
-	const afterProps = afterOutput.properties ?? {};
-	const beforeRequired = new Set(beforeOutput.required ?? []);
+	const beforeProps = propertiesOf(beforeOutput);
+	const afterProps = propertiesOf(afterOutput);
+	const beforeRequired = requiredOf(beforeOutput);
 	return [
-		...diffAddedOutputFields(toolName, afterProps, beforeProps, new Set(afterOutput.required ?? [])),
+		...diffAddedOutputFields(toolName, afterProps, beforeProps, requiredOf(afterOutput)),
 		...diffRemovedOutputFields(toolName, beforeProps, afterProps, beforeRequired),
 		...diffModifiedOutputFields(toolName, beforeProps, afterProps)
 	];
